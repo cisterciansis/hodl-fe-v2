@@ -1,0 +1,875 @@
+"use client";
+
+import { OrderBook } from "../components/order-book";
+import { Order } from "../lib/types";
+import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { ThemeToggle } from "../components/theme-toggle";
+import { useTheme } from "../components/theme-provider";
+import { useWebSocket } from "../hooks/useWebSocket";
+import { WebSocketMessage } from "../lib/websocket-types";
+import { ConnectButton } from "../components/walletkit/connect";
+import { WalletModal } from "../components/walletkit/wallet-modal";
+import { NewOrderModal } from "../components/new-order-modal";
+import { useWallet } from "../context/wallet-context";
+import { Button } from "../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { getWebSocketNewUrl, getWebSocketTapUrl, API_URL } from "../lib/config";
+import { parseWsMessage } from "../lib/websocket-utils";
+import { parseRecResponse, postJson, extractResponseError, buildRecPayload, fetchDbRecord } from "../lib/api-utils";
+import { LoadingScreen } from "../components/loading-screen";
+import { NotificationBell, useNotifications } from "../components/notification-bell";
+import { PixelSymbolsBackground } from "../components/pixel-symbols-background";
+import { useTMCSubnets } from "../hooks/useTMCSubnets";
+import { useTaoPrice } from "../contexts/taoPrice";
+import { useBlockHeight } from "../hooks/useBlockHeight";
+import { MiniSpinner } from "../components/ui/mini-spinner";
+import { RiBox3Line } from "react-icons/ri";
+import { useWalletAutoReconnect } from "../hooks/useWalletAutoReconnect";
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
+  const { selectedAccount, walletModalOpen, closeWalletModal } = useWallet();
+  useWalletAutoReconnect();
+  useTMCSubnets();
+  const searchParams = useSearchParams();
+  const { theme } = useTheme();
+  const { price: taoPrice, loading: taoPriceLoading } = useTaoPrice();
+  const { height: blockHeight, loading: blockLoading } = useBlockHeight();
+  const [mounted, setMounted] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [newOrderModalOpen, setNewOrderModalOpen] = useState(false);
+  const [prices, setPrices] = useState<Record<number, number>>({});
+  const [newlyAddedOrderIds, setNewlyAddedOrderIds] = useState<
+    Map<string, number>
+  >(new Map());
+  const [showMyOrdersOnly, setShowMyOrdersOnly] = useState(false);
+  const [showWalletConnectDialog, setShowWalletConnectDialog] = useState(false);
+  const [ofm, setOfm] = useState<[number, number, number]>([10, 0.01, 0.001]); // [open_max, open_min, fill_min]
+  const [recPopupMessage, setRecPopupMessage] = useState<string>("");
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  const [showLoading, setShowLoading] = useState(true);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [subnetNames, setSubnetNames] = useState<Record<number, string>>({});
+  const isLivePausedRef = useRef(false);
+  const orderBufferRef = useRef<Order[]>([]);
+  const { notifications, addNotification, dismiss: dismissNotification, clearAll: clearNotifications } = useNotifications();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Reason: Expose page header height as CSS variable so the order-book
+  // card header can compute its own sticky offset dynamically.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => {
+      const h = el.getBoundingClientRect().height;
+      document.documentElement.style.setProperty("--page-header-height", `${h}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Fetch OFM settings from backend
+  useEffect(() => {
+    const fetchOfm = async () => {
+      try {
+        const response = await fetch(`${API_URL}/ofm`);
+        if (!response.ok) return;
+        const data = await response.json();
+        // Backend returns str([...]) so data is a string like "[10, 0.01, 0.001]"
+        const parsed = typeof data === "string" ? JSON.parse(data) : data;
+        if (Array.isArray(parsed) && parsed.length === 3) {
+          setOfm([Number(parsed[0]), Number(parsed[1]), Number(parsed[2])]);
+        }
+      } catch (error) {
+        console.error("Error fetching OFM settings:", error);
+      }
+    };
+    fetchOfm();
+  }, []);
+
+  useEffect(() => {
+    // Only reset filter if wallet disconnects while filter is active
+    if (!selectedAccount && showMyOrdersOnly) {
+      setShowMyOrdersOnly(false);
+    }
+  }, [selectedAccount, showMyOrdersOnly]);
+
+  const handleMyOrdersClick = () => {
+    if (!selectedAccount) {
+      setShowWalletConnectDialog(true);
+      return;
+    }
+    setShowMyOrdersOnly(!showMyOrdersOnly);
+  };
+
+  const handleLogoClick = () => {
+    setShowMyOrdersOnly(false);
+  };
+
+  const isTerminalStatus = (status: number) => {
+    return [3, 4, 6].includes(status);
+  };
+
+  const updateOrders = useCallback((updatedOrder: Order) => {
+    if (isLivePausedRef.current) {
+      orderBufferRef.current.push(updatedOrder);
+      return;
+    }
+    setOrders((prevOrders) => {
+      const sameStatusIndex = prevOrders.findIndex(
+        (o) => o.uuid === updatedOrder.uuid && o.status === updatedOrder.status
+      );
+
+      if (sameStatusIndex !== -1) {
+        const existingOrder = prevOrders[sameStatusIndex];
+        const mergedOrder = {
+          ...existingOrder,
+          ...updatedOrder,
+          tao: updatedOrder.tao > 0 ? updatedOrder.tao : existingOrder.tao,
+          alpha: updatedOrder.alpha > 0 ? updatedOrder.alpha : existingOrder.alpha,
+          price: updatedOrder.price > 0 ? updatedOrder.price : existingOrder.price,
+        };
+
+        const newOrders = [...prevOrders];
+        newOrders[sameStatusIndex] = mergedOrder;
+        return newOrders;
+      }
+
+      const sameUuidIndex = prevOrders.findIndex(
+        (o) => o.uuid === updatedOrder.uuid
+      );
+
+      if (sameUuidIndex !== -1) {
+        const existingOrder = prevOrders[sameUuidIndex];
+
+        if (updatedOrder.status === 1 && existingOrder.status !== 1) {
+          const orderId = `${updatedOrder.uuid}-${updatedOrder.status}-${updatedOrder.escrow || ""}`;
+          setNewlyAddedOrderIds((prev) => {
+            const next = new Map(prev);
+            next.set(orderId, updatedOrder.type);
+            return next;
+          });
+
+          setTimeout(() => {
+            setNewlyAddedOrderIds((prev) => {
+              const next = new Map(prev);
+              next.delete(orderId);
+              return next;
+            });
+          }, 3500);
+        }
+
+        const mergedOrder = {
+          ...existingOrder,
+          ...updatedOrder,
+          tao: updatedOrder.tao > 0 ? updatedOrder.tao : existingOrder.tao,
+          alpha: updatedOrder.alpha > 0 ? updatedOrder.alpha : existingOrder.alpha,
+          price: updatedOrder.price > 0 ? updatedOrder.price : existingOrder.price,
+        };
+
+        const newOrders = [...prevOrders];
+        newOrders[sameUuidIndex] = mergedOrder;
+        return newOrders;
+      }
+
+      if (updatedOrder.status === 1) {
+        const orderId = `${updatedOrder.uuid}-${updatedOrder.status}-${updatedOrder.escrow || ""}`;
+        setNewlyAddedOrderIds((prev) => {
+          const next = new Map(prev);
+          next.set(orderId, updatedOrder.type);
+          return next;
+        });
+
+        setTimeout(() => {
+          setNewlyAddedOrderIds((prev) => {
+            const next = new Map(prev);
+            next.delete(orderId);
+            return next;
+          });
+        }, 3500);
+      }
+
+      return [updatedOrder, ...prevOrders];
+    });
+  }, []);
+
+  const handleLivePauseChange = useCallback((paused: boolean) => {
+    isLivePausedRef.current = paused;
+    if (!paused) {
+      const buffered = [...orderBufferRef.current];
+      orderBufferRef.current = [];
+      for (const order of buffered) {
+        updateOrders(order);
+      }
+    }
+  }, [updateOrders]);
+
+  const normalizeOrder = useCallback((order: any): Order => {
+    return {
+      ...order,
+      accept: order.accept ?? "",
+      period: Number(order.period || 0),
+      partial:
+        order.partial === "True" ||
+        order.partial === true ||
+        order.partial === 1,
+      public:
+        order.public === "True" || order.public === true || order.public === 1,
+      status: Number(order.status),
+      type: Number(order.type),
+      asset: Number(order.asset),
+      ask: Number(order.ask || 0),
+      bid: Number(order.bid || 0),
+      stp: Number(order.stp || 0),
+      lmt: Number(order.lmt || 0),
+      tao: Number(order.tao || 0),
+      alpha: Number(order.alpha || 0),
+      price: Number(order.price || 0),
+    };
+  }, []);
+
+  /**
+   * Normalizes WebSocket message to extract order data.
+   * Handles two formats:
+   * 1. Nested: {uuid: '...', data: {...}} or {uuid: '...', data: [...]}
+   * 2. Flat: {date: '...', uuid: '...', ...} (message itself is the order)
+   */
+  const extractOrderData = useCallback(
+    (
+      message: WebSocketMessage | Order
+    ): {
+      orderData: Order | Order[];
+      messageUuid: string;
+    } | null => {
+      if (!message || typeof message !== "object") {
+        return null;
+      }
+
+      if ("data" in message && message.data !== undefined) {
+        const wsMessage = message as WebSocketMessage;
+        return {
+          orderData: wsMessage.data!,
+          messageUuid: wsMessage.uuid || "",
+        };
+      }
+
+      if ("uuid" in message && "date" in message) {
+        return {
+          orderData: message as Order,
+          messageUuid: (message as Order).uuid || "",
+        };
+      }
+
+      return null;
+    },
+    []
+  );
+
+  const handleWebSocketMessage = useCallback(
+    (message: WebSocketMessage | unknown) => {
+      const extracted = extractOrderData(message as WebSocketMessage | Order);
+      if (!extracted) {
+        return;
+      }
+
+      const { orderData, messageUuid } = extracted;
+
+      if (Array.isArray(orderData)) {
+        setOrders((prev) => {
+          const map = new Map(prev.map((o) => [o.uuid, o]));
+
+          for (const order of orderData) {
+            const normalized = normalizeOrder({
+              ...order,
+              uuid: order.uuid || messageUuid,
+            });
+
+            if (!normalized.uuid) {
+              continue;
+            }
+
+            if (isTerminalStatus(normalized.status)) {
+              map.delete(normalized.uuid);
+            } else {
+              map.set(normalized.uuid, normalized);
+            }
+          }
+
+          return Array.from(map.values());
+        });
+      } else {
+        const normalized = normalizeOrder({
+          ...orderData,
+          uuid: orderData.uuid || messageUuid,
+        });
+
+        if (normalized.uuid) {
+          updateOrders(normalized);
+
+          const walletAddr = selectedAccount?.address;
+          if (walletAddr && normalized.wallet === walletAddr) {
+            if (normalized.status === 2) {
+              addNotification({
+                type: "filled",
+                message: `Order ${normalized.uuid.slice(0, 8)}... has been filled`,
+                orderUuid: normalized.uuid,
+              });
+            } else if (normalized.status === 3) {
+              addNotification({
+                type: "cancelled",
+                message: `Order ${normalized.uuid.slice(0, 8)}... has been closed`,
+                orderUuid: normalized.uuid,
+              });
+            }
+          }
+        }
+      }
+    },
+    [extractOrderData, normalizeOrder, updateOrders, selectedAccount?.address, addNotification]
+  );
+
+  const { connectionState } = useWebSocket({
+    url: getWebSocketNewUrl(selectedAccount?.address ? { ss58: selectedAccount.address } : undefined),
+    onMessage: handleWebSocketMessage,
+  });
+
+  // /ws/tap - handles TAO/Alpha/Price triplet updates
+  // Carries both per-escrow updates AND subnet price broadcasts
+  const pendingPricesRef = useRef<Record<number, number>>({});
+  const priceFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTapsRef = useRef<Map<string, { tao: number; alpha: number; price: number }>>(new Map());
+  const tapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPrices = useCallback(() => {
+    const pending = pendingPricesRef.current;
+    if (Object.keys(pending).length === 0) return;
+    pendingPricesRef.current = {};
+    setPrices((prev) => ({ ...prev, ...pending }));
+  }, []);
+
+  const flushTaps = useCallback(() => {
+    const pending = new Map(pendingTapsRef.current);
+    pendingTapsRef.current.clear();
+    if (pending.size === 0) return;
+    setOrders((prev) =>
+      prev.map((order) => {
+        if (order.status === 1 && order.escrow && pending.has(order.escrow)) {
+          const update = pending.get(order.escrow)!;
+          return { ...order, ...update };
+        }
+        return order;
+      })
+    );
+  }, []);
+
+  const handleTapMessage = useCallback((message: unknown) => {
+    try {
+      const tapData = parseWsMessage<Record<string, unknown>>(message);
+      if (!tapData || typeof tapData !== "object") return;
+
+      // Handle subnet price broadcasts: { price: { "0": 1.0, ... }, subnet_name: { ... } }
+      const priceObj = tapData.price;
+      if (priceObj && typeof priceObj === "object" && !Array.isArray(priceObj)) {
+        for (const [key, value] of Object.entries(priceObj as Record<string, unknown>)) {
+          const netuid = Number(key);
+          const price = Number(value);
+          if (!isNaN(netuid) && !isNaN(price) && price > 0) {
+            pendingPricesRef.current[netuid] = price;
+          }
+        }
+        if (!priceFlushTimerRef.current) {
+          priceFlushTimerRef.current = setTimeout(() => {
+            priceFlushTimerRef.current = null;
+            flushPrices();
+          }, 200);
+        }
+      }
+
+      const nameObj = tapData.subnet_name;
+      if (nameObj && typeof nameObj === "object" && !Array.isArray(nameObj)) {
+        const next: Record<number, string> = {};
+        for (const [key, value] of Object.entries(nameObj as Record<string, unknown>)) {
+          const netuid = Number(key);
+          if (!isNaN(netuid) && typeof value === "string") {
+            next[netuid] = value;
+          }
+        }
+        if (Object.keys(next).length > 0) {
+          setSubnetNames((prev) => ({ ...prev, ...next }));
+        }
+      }
+
+      // Handle per-escrow updates: { escrow, tao, alpha, price }
+      if ("escrow" in tapData && tapData.escrow) {
+        const escrow = String(tapData.escrow);
+        pendingTapsRef.current.set(escrow, {
+          tao: Number(tapData.tao || 0),
+          alpha: Number(tapData.alpha || 0),
+          price: Number(tapData.price || 0),
+        });
+        if (!tapFlushTimerRef.current) {
+          tapFlushTimerRef.current = setTimeout(() => {
+            tapFlushTimerRef.current = null;
+            flushTaps();
+          }, 200);
+        }
+      }
+    } catch (error) {
+      console.error("Error processing tap message:", error);
+    }
+  }, [flushPrices, flushTaps]);
+
+  useEffect(() => {
+    return () => {
+      if (priceFlushTimerRef.current) clearTimeout(priceFlushTimerRef.current);
+      if (tapFlushTimerRef.current) clearTimeout(tapFlushTimerRef.current);
+    };
+  }, []);
+
+  useWebSocket({
+    url: getWebSocketTapUrl(selectedAccount?.address ? { ss58: selectedAccount.address } : undefined),
+    onMessage: handleTapMessage,
+  });
+
+  // Fetch initial prices via REST
+  useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        const response = await fetch(`${API_URL}/price`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const parsed = typeof data === "string" ? JSON.parse(data) : data;
+        if (parsed && typeof parsed === "object") {
+          const priceMap: Record<number, number> = {};
+          for (const [key, value] of Object.entries(parsed)) {
+            const netuid = Number(key);
+            const price = Number(value);
+            if (!isNaN(netuid) && !isNaN(price) && price > 0) {
+              priceMap[netuid] = price;
+            }
+          }
+          if (Object.keys(priceMap).length > 0) {
+            setPrices((prev) => ({ ...prev, ...priceMap }));
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching initial prices:", error);
+      }
+    };
+    fetchPrices();
+  }, []);
+
+  useEffect(() => {
+    const fetchInitialOrders = async () => {
+      try {
+        const response = await fetch(`${API_URL}/sql?limit=1000`);
+
+        if (!response.ok) {
+          console.error("Failed to fetch initial orders:", response.statusText);
+          setInitialDataLoaded(true);
+          return;
+        }
+
+        const data = await response.json();
+
+        const ordersArray = typeof data === "string" ? JSON.parse(data) : data;
+
+        if (!Array.isArray(ordersArray)) {
+          console.error("Invalid orders data format");
+          setInitialDataLoaded(true);
+          return;
+        }
+
+        const normalizedOrders = ordersArray
+          .map((order: any) => normalizeOrder(order));
+
+        if (normalizedOrders.length > 0) {
+          setOrders(normalizedOrders);
+        }
+      } catch (error) {
+        console.error("Error fetching initial orders:", error);
+      } finally {
+        setInitialDataLoaded(true);
+      }
+    };
+
+    fetchInitialOrders();
+  }, [normalizeOrder]);
+
+  // Reason: Support shareable order links (?order=UUID) for private orders.
+  // Fetches the specific order and injects it into the orders list.
+  useEffect(() => {
+    const orderUuid = searchParams.get("order");
+    if (!orderUuid || !initialDataLoaded) return;
+
+    const alreadyExists = orders.some((o) => o.uuid === orderUuid);
+    if (alreadyExists) return;
+
+    const fetchSharedOrder = async () => {
+      try {
+        const response = await fetch(`${API_URL}/sql?uuid=${orderUuid}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const parsed = typeof data === "string" ? JSON.parse(data) : data;
+        const orderArr = Array.isArray(parsed) ? parsed : [parsed];
+        for (const raw of orderArr) {
+          if (raw && raw.uuid) {
+            const normalized = normalizeOrder(raw);
+            setOrders((prev) => {
+              if (prev.some((o) => o.uuid === normalized.uuid && o.status === normalized.status)) return prev;
+              return [normalized, ...prev];
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching shared order:", error);
+      }
+    };
+    fetchSharedOrder();
+  }, [searchParams, initialDataLoaded, normalizeOrder, orders]);
+
+  const handleUpdateOrder = async (uuid: string, updates: Partial<Order>) => {
+    try {
+      const order = orders.find((o) => o.uuid === uuid && o.status === 1);
+      if (!order) return;
+
+      const dbRecord = await fetchDbRecord(API_URL, order.escrow);
+      const updatedOrderData = buildRecPayload({
+        ...dbRecord,
+        ...updates,
+        uuid: order.uuid,
+        status: 1,
+      });
+
+      const response = await postJson(`${API_URL}/rec`, updatedOrderData);
+      if (!response.ok) throw new Error("Failed to update order");
+
+      try {
+        const data = await response.json();
+        const text = typeof data === "string" ? data : JSON.stringify(data);
+        const recResult = parseRecResponse(text);
+        if (recResult?.message) setRecPopupMessage(recResult.message);
+      } catch { /* ignore */ }
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.uuid === uuid && o.status === 1 ? { ...o, ...updates } : o
+        )
+      );
+    } catch (error) {
+      console.error("Error updating order:", error);
+    }
+  };
+
+  const handleCancelOrder = async (uuid: string) => {
+    try {
+      const order = orders.find((o) => o.uuid === uuid && o.status === 1);
+      if (!order) return;
+
+      const dbRecord = await fetchDbRecord(API_URL, order.escrow);
+      const closeOrderData = buildRecPayload({
+        ...dbRecord,
+        uuid: order.uuid,
+        status: 3,
+      });
+
+      const response = await postJson(`${API_URL}/rec`, closeOrderData);
+      if (!response.ok) throw new Error("Failed to close order");
+
+      try {
+        const data = await response.json();
+        const text = typeof data === "string" ? data : JSON.stringify(data);
+        const recResult = parseRecResponse(text);
+        if (recResult?.message) setRecPopupMessage(recResult.message);
+      } catch { /* ignore */ }
+    } catch (error) {
+      console.error("Error closing order:", error);
+    }
+  };
+
+  const { openOrders, filledOrdersMap } = useMemo(() => {
+    const open: Order[] = [];
+    const filled: Record<string, Order[]> = {}; // Parent UUID -> filled + closed orders array
+
+    orders.forEach((order) => {
+      if (order.status === 1 && order.public === true) {
+        open.push(order);
+      } else if (order.status === 2 || order.status === 3) {
+        const parentUuid = order.origin || order.uuid;
+        if (!filled[parentUuid]) {
+          filled[parentUuid] = [];
+        }
+        filled[parentUuid].push(order);
+      }
+    });
+
+    Object.keys(filled).forEach((uuid) => {
+      filled[uuid].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return dateB - dateA;
+      });
+    });
+
+    return { openOrders: open, filledOrdersMap: filled };
+  }, [orders]);
+
+  const sortedOrders = useMemo(() => {
+    let filteredOrders = openOrders;
+    if (showMyOrdersOnly && selectedAccount?.address) {
+      const addr = selectedAccount.address;
+      filteredOrders = orders.filter(
+        (order) => order.wallet === addr || order.origin === addr
+      );
+    }
+
+    const uniqueOrdersMap = new Map<string, Order>();
+    filteredOrders.forEach((order) => {
+      const existing = uniqueOrdersMap.get(order.uuid);
+      if (!existing) {
+        uniqueOrdersMap.set(order.uuid, order);
+      } else {
+        const existingDate = new Date(existing.date).getTime();
+        const currentDate = new Date(order.date).getTime();
+        if (currentDate > existingDate) {
+          uniqueOrdersMap.set(order.uuid, order);
+        }
+      }
+    });
+
+    return Array.from(uniqueOrdersMap.values()).sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateB - dateA;
+    });
+  }, [orders, openOrders, showMyOrdersOnly, selectedAccount?.address]);
+
+  return (
+    <>
+      {showLoading && (
+        <LoadingScreen
+          minDisplayTime={2400}
+          isReady={initialDataLoaded && mounted}
+          onComplete={() => setShowLoading(false)}
+        />
+      )}
+    {/* 8-bit pixel symbols floating background */}
+    <PixelSymbolsBackground />
+    <main className="min-h-screen relative z-10">
+      <div className="container mx-auto px-3 sm:px-4 max-w-7xl pt-2 sm:pt-4">
+        <header ref={headerRef} className="mb-3 sm:mb-6 sticky top-0 z-50 bg-white/80 dark:bg-background/80 backdrop-blur-md">
+          {/* Primary nav row */}
+          <div className="flex items-center justify-between w-full pt-3 sm:pt-6 pb-2 sm:pb-3 gap-2">
+            <div className="flex items-center gap-[2px] min-w-0">
+              <button
+                onClick={handleLogoClick}
+                className="px-1 sm:px-1.5 pt-1.5 sm:pt-2 hover:opacity-80 transition-opacity cursor-pointer shrink-0"
+                aria-label="Return to main page"
+              >
+                <Image
+                  src="/hodl_logo_lg.png"
+                  alt="HODL Exchange Logo"
+                  width={50}
+                  height={50}
+                  className="object-contain w-9 h-9 sm:w-[50px] sm:h-[50px]"
+                />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-[14px] sm:text-[18px] font-normal tracking-tight text-foreground font-[family-name:var(--font-pixel)]">
+                    HODL<span className="ml-1 sm:ml-2">Exchange</span>
+                  </h1>
+                </div>
+                <div className="flex items-center gap-3">
+                  <a
+                    href="https://github.com/mobiusfund/etf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#06F] dark:text-[#39F] text-[12px] sm:text-[15px] font-medium tracking-tight leading-[0.75rem] hover:opacity-80 transition-colors"
+                  >
+                    Powered by Subnet 118
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+              <ThemeToggle />
+              <NotificationBell
+                notifications={notifications}
+                onClear={clearNotifications}
+                onDismiss={dismissNotification}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMyOrdersClick}
+                className={`h-8 sm:h-9 gap-1.5 sm:gap-2 px-2 sm:px-3 ${showMyOrdersOnly
+                  ? "bg-slate-100 dark:bg-muted border-slate-300 dark:border-border font-medium hover:bg-slate-200 dark:hover:bg-muted/80"
+                  : ""
+                  }`}
+              >
+                {mounted ? (
+                  <Image
+                    src={theme === "light" ? "/myorders-light.png" : "/myorders-black.png"}
+                    alt="My Orders"
+                    width={32}
+                    height={32}
+                    className="w-[1.125rem] h-[1.125rem] sm:w-[1.375rem] sm:h-[1.375rem]"
+                  />
+                ) : (
+                  <Image
+                    src="/myorders-light.png"
+                    alt="My Orders"
+                    width={32}
+                    height={32}
+                    className="w-[1.125rem] h-[1.125rem] sm:w-[1.375rem] sm:h-[1.375rem]"
+                  />
+                )}
+                <span className="hidden sm:inline">My Orders</span>
+              </Button>
+              <ConnectButton />
+            </div>
+          </div>
+
+          {/* Stats ticker strip */}
+          <div className="flex items-center gap-3 sm:gap-6 pb-2 sm:pb-3 border-b border-slate-200 dark:border-border/40 overflow-x-auto scrollbar-hide">
+            {/* TAO Price */}
+            <a
+              href="https://taomarketcap.com/subnets/0"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 shrink-0 hover:opacity-70 transition-opacity"
+            >
+              {taoPriceLoading ? (
+                <>
+                  <span className="text-[12px] font-mono font-medium tracking-tight text-foreground tabular-nums">τ</span>
+                  <MiniSpinner size={12} className="text-muted-foreground" />
+                </>
+              ) : (
+                <span className="text-[12px] font-mono font-medium tracking-tight text-foreground tabular-nums">
+                  {taoPrice !== null
+                    ? `τ $${taoPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : "τ —"}
+                </span>
+              )}
+            </a>
+
+            {/* Separator */}
+            <div className="w-px h-3 bg-border/60 shrink-0" />
+
+            {/* Block Height */}
+            <a
+              href="https://taomarketcap.com/blockchain/blocks"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 shrink-0 hover:opacity-70 transition-opacity "
+              aria-label="Block"
+            >
+              <RiBox3Line className="h-3.5 w-3.5 mb-[3px] shrink-0 text-muted-foreground" aria-hidden />
+              {blockLoading ? (
+                <MiniSpinner size={12} className="text-muted-foreground" />
+              ) : (
+                <span className="text-[12px] font-mono font-medium tracking-tight text-foreground tabular-nums">
+                  {blockHeight !== null
+                    ? `#${blockHeight.toLocaleString()}`
+                    : "—"}
+                </span>
+              )}
+            </a>
+
+          </div>
+        </header>
+
+        <OrderBook
+          orders={sortedOrders}
+          prices={prices}
+          filledOrdersMap={filledOrdersMap}
+          newlyAddedOrderIds={newlyAddedOrderIds}
+          allOrdersForSearch={orders}
+          onUpdateOrder={handleUpdateOrder}
+          onCancelOrder={handleCancelOrder}
+          onFillOrder={undefined}
+          onRecMessage={setRecPopupMessage}
+          onNewOrder={() => setNewOrderModalOpen(true)}
+          apiUrl={API_URL}
+          showMyOrdersOnly={showMyOrdersOnly}
+          walletAddress={selectedAccount?.address}
+          connectionState={connectionState}
+          onPauseChange={handleLivePauseChange}
+          subnetNames={subnetNames}
+          ofm={ofm}
+        />
+
+        <NewOrderModal
+          open={newOrderModalOpen}
+          onOpenChange={setNewOrderModalOpen}
+          onRecMessage={setRecPopupMessage}
+          apiUrl={API_URL}
+          prices={prices}
+          ofm={ofm}
+          subnetNames={subnetNames}
+        />
+
+        <Dialog open={showWalletConnectDialog} onOpenChange={setShowWalletConnectDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Connect Wallet Required</DialogTitle>
+              <DialogDescription>
+                Please connect your wallet to view your orders. Click the Wallet button to connect.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                onClick={() => setShowWalletConnectDialog(false)}
+                variant="outline"
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <WalletModal open={walletModalOpen} onOpenChange={closeWalletModal} />
+
+        {/* Standalone popup for /rec messages (e.g. status 3 / order closed) */}
+        <Dialog open={!!recPopupMessage} onOpenChange={(open) => { if (!open) setRecPopupMessage(""); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Order closed</DialogTitle>
+              <DialogDescription>{recPopupMessage}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button onClick={() => setRecPopupMessage("")} variant="outline">
+                OK
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </main>
+    </>
+  );
+}
+
