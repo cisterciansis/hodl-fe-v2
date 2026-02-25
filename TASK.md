@@ -75,6 +75,17 @@
 - [x] **Footer** — Tighter bottom margin and font size on mobile
 - [x] **Mobile breakpoint** — Aligned `isMobileView` from 968px to 768px (Tailwind `md:` breakpoint)
 
+### 2026-02-25 — Order Creation Bug Fixes & Validation
+
+#### Critical Bug Fix
+- [x] **Stage 2 payload missing formData fields** — `handleFinalPlaceOrder()` was not including `asset`, `type`, `stp`, `gtd`, `partial`, `public` from formData in the `buildRecPayload` call. The BE `/dbjson` endpoint returns template defaults (asset=0, type=0) regardless of escrow param, so these fields were sent as 0/empty, causing orphaned escrows. Fixed by explicitly including all formData fields matching `handleNext()` and `handleReviewOrder()`.
+
+#### UI/UX Improvements
+- [x] **Rename Stop Price to Floor/Ceiling Price** — Label changed from "Stop Price (TAO)" to "Floor/Ceiling Price" with updated tooltip explaining sell floor and buy ceiling behavior.
+- [x] **Block past dates in GTD calendar** — Calendar now disables dates before today to prevent users from creating orders with expired good-till-dates. BE already rejects these but FE now prevents it upfront.
+- [x] **Floor/Ceiling price vs market warnings** — Added inline amber warnings: sell orders with floor price above market, buy orders with ceiling price below market. These are warnings (not blockers) since market prices change.
+- [x] **WebSocket connections verified** — `/ws/new?ss58=wallet` and `/ws/tap?ss58=wallet` patterns confirmed correct against BE codebase.
+
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`
 

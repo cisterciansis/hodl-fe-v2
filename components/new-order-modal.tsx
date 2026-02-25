@@ -722,6 +722,12 @@ export function NewOrderModal({
         origin: finalOrigin,
         escrow: finalEscrow,
         wallet: finalWallet,
+        asset: formData.asset,
+        type: formData.type,
+        stp: formData.stp ?? 0,
+        gtd: formData.gtd === "gtc" ? "gtc" : selectedDate?.toISOString() || "gtc",
+        partial: formData.partial,
+        public: formData.public,
         tao: formData.type === 2 ? Number(getTaoForSubmit()) : (taoValue || 0),
         alpha: formData.type === 1 ? Number(getAlphaForSubmit()) : (alphaValue || 0),
         price: priceValue,
@@ -1109,13 +1115,13 @@ export function NewOrderModal({
           />
           <div className="grid gap-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="stp">Stop Price (TAO)</Label>
+              <Label htmlFor="stp">Floor/Ceiling Price</Label>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help opacity-60 hover:opacity-100 transition-opacity" />
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-[280px]">
-                  <p>Optional. For Buy orders, only stop prices above market have an effect. For Sell orders, only stop prices below market have an effect.</p>
+                  <p>If you&apos;re selling, this prevents your order from executing below your minimum price. If you&apos;re buying, this prevents your order from executing above your maximum price.</p>
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -1150,7 +1156,7 @@ export function NewOrderModal({
                   }
                 }}
                 disabled={escrowGenerated && !isInReviewMode}
-                placeholder="Enter stop price"
+                placeholder="Enter floor/ceiling price"
                 className="focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40 pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <div className="absolute right-1 flex flex-col gap-0.5">
@@ -1167,7 +1173,7 @@ export function NewOrderModal({
                   }}
                   disabled={escrowGenerated && !isInReviewMode}
                   className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  aria-label="Increase stop price"
+                  aria-label="Increase floor/ceiling price"
                 >
                   <ChevronUp className="h-3 w-3 text-muted-foreground" />
                 </button>
@@ -1188,7 +1194,7 @@ export function NewOrderModal({
                   }}
                   disabled={escrowGenerated && !isInReviewMode}
                   className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  aria-label="Decrease stop price"
+                  aria-label="Decrease floor/ceiling price"
                 >
                   <ChevronDown className="h-3 w-3 text-muted-foreground" />
                 </button>
@@ -1197,6 +1203,16 @@ export function NewOrderModal({
             <p className="text-sm text-muted-foreground opacity-60">
               Market Price {priceForConversion > 0 ? priceForConversion.toFixed(6) : "0.000000"}
             </p>
+            {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 1 && formData.stp > priceForConversion && (
+              <p className="text-sm text-amber-600 dark:text-amber-400">
+                Floor price is above current market price &mdash; your order will not execute until market rises above this level.
+              </p>
+            )}
+            {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 2 && formData.stp < priceForConversion && (
+              <p className="text-sm text-amber-600 dark:text-amber-400">
+                Ceiling price is below current market price &mdash; your order will not execute until market drops below this level.
+              </p>
+            )}
           </div>
 
           <div className="grid gap-2">
@@ -1258,7 +1274,12 @@ export function NewOrderModal({
                       selected={selectedDate}
                       onSelect={setSelectedDate}
                       initialFocus
-                      disabled={escrowGenerated && !isInReviewMode}
+                      disabled={(date) => {
+                        if (escrowGenerated && !isInReviewMode) return true;
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        return date < today;
+                      }}
                     />
                   </PopoverContent>
                 </Popover>
