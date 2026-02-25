@@ -99,6 +99,17 @@
   - Empty `{}` (no new orders this cycle)
   `initialDataLoaded` is set on the first WS message of any kind. Added 3s safety fallback after WS connects. Saves one HTTP round-trip per page load.
 
+### 2026-02-25 — Order Book New-Row Flash Polish
+
+#### Completed
+- [x] **Restore new-row buy/sell flash after batch WS merge** — Added new-open-order detection in `mergeOrderBatch()` so rows arriving via array/column-oriented `/ws/new` payloads are flagged in `newlyAddedOrderIds` (excluding initial hydration), then auto-cleared after animation window.
+- [x] **Subtle buy/sell row animation palette** — Reworked `animate-flash-buy` / `animate-flash-sell` keyframes to use softer translucent emerald/rose overlays and gentle outline glow to match the New Order / Fill Order visual style.
+
+### 2026-02-25 — Order Book UI Fix
+
+#### Completed
+- [x] **Filled orders vertical misalignment** — Expanded row details' filled orders table had no column width definitions, causing columns to misalign with the parent order book table. Fixed by applying `table-fixed` with a `<colgroup>` matching the parent column sizes (160, 110, 60, 50, 70, 70, 90, 90), negative margins to cancel parent padding, and matching cell padding/alignment.
+
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`
 

@@ -253,8 +253,10 @@ function HomeContent() {
    * Merge an array of row-objects into state using a uuid-keyed Map so
    * duplicates are collapsed and terminal statuses are removed.
    */
-  const mergeOrderBatch = useCallback((incoming: unknown[]) => {
+  const mergeOrderBatch = useCallback((incoming: unknown[], shouldAnimateNewRows: boolean = false) => {
     if (incoming.length === 0) return;
+
+    const newlyOpened = new Map<string, number>();
     setOrders((prev) => {
       const map = new Map(prev.map((o) => [o.uuid, o]));
 
@@ -262,16 +264,48 @@ function HomeContent() {
         if (!raw || typeof raw !== "object") continue;
         const normalized = normalizeOrder(raw);
         if (!normalized.uuid) continue;
+        const existing = map.get(normalized.uuid);
 
         if (isTerminalStatus(normalized.status)) {
           map.delete(normalized.uuid);
         } else {
+          if (
+            shouldAnimateNewRows &&
+            normalized.status === 1 &&
+            (
+              !existing ||
+              existing.status !== 1 ||
+              (existing.escrow || "") !== (normalized.escrow || "")
+            )
+          ) {
+            const orderId = `${normalized.uuid}-${normalized.status}-${normalized.escrow || ""}`;
+            newlyOpened.set(orderId, normalized.type);
+          }
           map.set(normalized.uuid, normalized);
         }
       }
 
       return Array.from(map.values());
     });
+
+    if (newlyOpened.size > 0) {
+      const ids = Array.from(newlyOpened.keys());
+      setNewlyAddedOrderIds((prev) => {
+        const next = new Map(prev);
+        newlyOpened.forEach((type, id) => {
+          next.set(id, type);
+        });
+        return next;
+      });
+
+      setTimeout(() => {
+        setNewlyAddedOrderIds((prev) => {
+          const next = new Map(prev);
+          ids.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, 3500);
+    }
   }, [normalizeOrder]);
 
   /**
@@ -312,7 +346,7 @@ function HomeContent() {
 
       // 1. Raw array (records format, or future backend update)
       if (Array.isArray(message)) {
-        mergeOrderBatch(message);
+        mergeOrderBatch(message, initialDataLoaded);
         if (!initialDataLoaded) setInitialDataLoaded(true);
         return;
       }
@@ -333,7 +367,7 @@ function HomeContent() {
         const sample = msg[sampleKey];
         if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
           const rows = columnsToRows(msg);
-          mergeOrderBatch(rows);
+          mergeOrderBatch(rows, initialDataLoaded);
           if (!initialDataLoaded) setInitialDataLoaded(true);
           return;
         }
@@ -343,7 +377,7 @@ function HomeContent() {
       if ("data" in msg && msg.data !== undefined) {
         const payload = msg.data;
         if (Array.isArray(payload)) {
-          mergeOrderBatch(payload);
+          mergeOrderBatch(payload, initialDataLoaded);
         } else if (payload && typeof payload === "object") {
           const normalized = normalizeOrder(payload);
           if (normalized.uuid) updateOrders(normalized);

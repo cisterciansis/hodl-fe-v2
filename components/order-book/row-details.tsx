@@ -593,71 +593,83 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
 
       {filledOrders.length > 0 && (
         <>
-          {/* Desktop: table layout */}
-          <div className="!my-2 hidden sm:block">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <tbody>
-                  {filledOrders.map((filledOrder, index) => {
-                    const isClosed = filledOrder.status === 3;
-                    const orderTypeLabel = getOrderType(filledOrder.type);
-                    const uniqueKey = `${filledOrder.uuid}-${filledOrder.escrow}-${index}`;
-                    const filledOrderId = `${filledOrder.uuid}-${filledOrder.status}-${filledOrder.escrow || ""}`;
-                    const shouldFlash = newlyAddedOrderIds.has(filledOrderId);
-                    const filledOrderType = newlyAddedOrderIds.get(filledOrderId);
-                    const flashClass = shouldFlash
-                      ? filledOrderType === 2 ? "animate-flash-buy" : "animate-flash-sell"
-                      : "";
+          {/* Desktop: table layout — negative margins cancel parent px so columns align with the main order book table */}
+          <div className="!my-2 hidden sm:block -mx-3 sm:-mx-6">
+            <table className="w-full text-sm table-fixed border-separate border-spacing-0">
+              <colgroup>
+                <col style={{ width: 160 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 60 }} />
+                <col style={{ width: 50 }} />
+                <col style={{ width: 70 }} />
+                <col style={{ width: 70 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 90 }} />
+              </colgroup>
+              <tbody>
+                {filledOrders.map((filledOrder, index) => {
+                  const isClosed = filledOrder.status === 3;
+                  const orderTypeLabel = getOrderType(filledOrder.type);
+                  const uniqueKey = `${filledOrder.uuid}-${filledOrder.escrow}-${index}`;
+                  const filledOrderId = `${filledOrder.uuid}-${filledOrder.status}-${filledOrder.escrow || ""}`;
+                  const shouldFlash = newlyAddedOrderIds.has(filledOrderId);
+                  const filledOrderType = newlyAddedOrderIds.get(filledOrderId);
+                  const flashClass = shouldFlash
+                    ? filledOrderType === 2 ? "animate-flash-buy" : "animate-flash-sell"
+                    : "";
 
-                    return (
-                      <tr key={uniqueKey} className={`hover:bg-muted/50 transition-colors ${flashClass}`}>
-                        <td className="pr-3 py-3 pl-2 font-mono whitespace-nowrap text-sm">{formatDate(filledOrder.date)}</td>
-                        <td className="pr-3 py-3 pl-2 font-mono whitespace-nowrap text-sm">
-                          <div className="flex items-center gap-1.5">
-                            <span className="block" title={filledOrder.escrow}>{formatWalletAddress(filledOrder.escrow)}</span>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); copyToClipboard(filledOrder.escrow, "filledEscrow", uniqueKey); }}
-                              className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 opacity-60 hover:opacity-90"
-                              title="Copy escrow address"
-                            >
-                              {copiedFilledEscrowIds.has(uniqueKey) ? <CheckIcon className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                            </button>
-                            <a href={`https://taostats.io/account/${filledOrder.escrow}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View on Taostats: ${filledOrder.escrow}`} onClick={(e) => e.stopPropagation()}>
+                  return (
+                    <tr key={uniqueKey} className={`hover:bg-muted/50 transition-colors ${flashClass}`}>
+                      <td className="p-4">
+                        <div className="font-mono whitespace-nowrap pl-4 text-sm">{formatDate(filledOrder.date)}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono whitespace-nowrap block text-sm" title={filledOrder.escrow}>{formatWalletAddress(filledOrder.escrow)}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyToClipboard(filledOrder.escrow, "filledEscrow", uniqueKey); }}
+                            className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 opacity-60 hover:opacity-90"
+                            title="Copy escrow address"
+                          >
+                            {copiedFilledEscrowIds.has(uniqueKey) ? <CheckIcon className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          </button>
+                          <a href={`https://taostats.io/account/${filledOrder.escrow}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View on Taostats: ${filledOrder.escrow}`} onClick={(e) => e.stopPropagation()}>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <Badge variant={orderTypeLabel === "Buy" ? "outline" : "secondary"} className={`font-medium ${orderTypeLabel === "Buy" ? "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400" : "text-rose-600 border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 dark:text-rose-400"}`}>{orderTypeLabel}</Badge>
+                      </td>
+                      <td className="p-4">
+                        {order.asset === 0 ? <span className="font-mono text-sm">—</span> : (
+                          <div className="flex justify-end gap-1.5">
+                            <span className="font-mono text-sm">SN{order.asset}</span>
+                            <a href={`https://taomarketcap.com/subnets/${order.asset}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground mt-[2px] transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View subnet ${order.asset} on TaoMarketCap`} onClick={(e) => e.stopPropagation()}>
                               <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                           </div>
-                        </td>
-                        <td className="pr-3 py-3">
-                          <div className="flex justify-center">
-                            <Badge variant={orderTypeLabel === "Buy" ? "outline" : "secondary"} className={`font-medium ${orderTypeLabel === "Buy" ? "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400" : "text-rose-600 border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 dark:text-rose-400"}`}>{orderTypeLabel}</Badge>
-                          </div>
-                        </td>
-                        <td className="pr-3 py-3 pl-4 font-mono text-sm">
-                          {order.asset === 0 ? "—" : (
-                            <div className="flex items-center gap-1.5 justify-end pr-[2px]">
-                              <span>SN{order.asset}</span>
-                              <a href={`https://taomarketcap.com/subnets/${order.asset}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View subnet ${order.asset} on TaoMarketCap`} onClick={(e) => e.stopPropagation()}>
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              </a>
-                            </div>
-                          )}
-                        </td>
-                        <td className="pr-3 py-3 pl-2 text-right font-mono text-sm">{formatTao(Number(filledOrder.tao ?? 0))}</td>
-                        <td className="py-3 pr-2 pl-8 text-right font-mono text-sm">{formatNumber(Number(filledOrder.alpha ?? 0))}</td>
-                        <td className="pr-4 py-3 pl-6 font-mono text-sm">
-                          <div className="flex justify-end">{filledOrder.price != null && Number(filledOrder.price) > 0 ? formatPrice(Number(filledOrder.price)) : formatPrice(filledOrder.stp || 0)}</div>
-                        </td>
-                        <td className="pr-3 py-3 pl-8 text-center">
-                          <div className="flex justify-center">
-                            <Badge variant="outline" className="font-medium text-gray-600 dark:text-gray-400 border-gray-200 dark:border-border">{isClosed ? "Closed" : "Filled"}</Badge>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <div className="text-right font-mono text-sm">{formatTao(Number(filledOrder.tao ?? 0))}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="text-right font-mono text-sm">{formatNumber(Number(filledOrder.alpha ?? 0))}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex justify-end pr-4 font-mono text-sm">{filledOrder.price != null && Number(filledOrder.price) > 0 ? formatPrice(Number(filledOrder.price)) : formatPrice(filledOrder.stp || 0)}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex justify-center pr-4">
+                          <Badge variant="outline" className="font-medium text-gray-600 dark:text-gray-400 border-gray-200 dark:border-border">{isClosed ? "Closed" : "Filled"}</Badge>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
 
           {/* Mobile: card layout */}

@@ -253,56 +253,70 @@ button[name="next-month"] {
 
 /* Flash animation for newly added orders - Buy (green) */
 @keyframes flash-buy {
-  from {
-    background: rgb(16 185 129 / 0.8);
-    box-shadow: 0 0 20px rgb(16 185 129 / 0.5);
+  0% {
+    background-color: rgb(16 185 129 / 0.2);
+    box-shadow:
+      inset 0 0 0 1px rgb(16 185 129 / 0.2),
+      0 0 0 1px rgb(16 185 129 / 0.14);
   }
 
-  30% {
-    background: rgb(16 185 129 / 0.6);
-    box-shadow: 0 0 15px rgb(16 185 129 / 0.3);
+  35% {
+    background-color: rgb(16 185 129 / 0.12);
+    box-shadow:
+      inset 0 0 0 1px rgb(16 185 129 / 0.14),
+      0 0 0 1px rgb(16 185 129 / 0.1);
   }
 
-  60% {
-    background: rgb(16 185 129 / 0.3);
-    box-shadow: 0 0 10px rgb(16 185 129 / 0.2);
+  70% {
+    background-color: rgb(16 185 129 / 0.06);
+    box-shadow:
+      inset 0 0 0 1px rgb(16 185 129 / 0.08),
+      0 0 0 1px rgb(16 185 129 / 0.06);
   }
 
-  to {
-    background: inherit;
+  100% {
+    background-color: transparent;
     box-shadow: none;
   }
 }
 
 /* Flash animation for newly added orders - Sell (red) */
 @keyframes flash-sell {
-  from {
-    background: rgb(244 63 94 / 0.8);
-    box-shadow: 0 0 20px rgb(244 63 94 / 0.5);
+  0% {
+    background-color: rgb(244 63 94 / 0.2);
+    box-shadow:
+      inset 0 0 0 1px rgb(244 63 94 / 0.2),
+      0 0 0 1px rgb(244 63 94 / 0.14);
   }
 
-  30% {
-    background: rgb(244 63 94 / 0.6);
-    box-shadow: 0 0 15px rgb(244 63 94 / 0.3);
+  35% {
+    background-color: rgb(244 63 94 / 0.12);
+    box-shadow:
+      inset 0 0 0 1px rgb(244 63 94 / 0.14),
+      0 0 0 1px rgb(244 63 94 / 0.1);
   }
 
-  60% {
-    background: rgb(244 63 94 / 0.3);
-    box-shadow: 0 0 10px rgb(244 63 94 / 0.2);
+  70% {
+    background-color: rgb(244 63 94 / 0.06);
+    box-shadow:
+      inset 0 0 0 1px rgb(244 63 94 / 0.08),
+      0 0 0 1px rgb(244 63 94 / 0.06);
   }
 
-  to {
-    background: inherit;
+  100% {
+    background-color: transparent;
     box-shadow: none;
   }
 }
 
 .animate-flash-buy {
-  animation: flash-buy 3.5s ease-out forwards;
+  animation: flash-buy 3.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: background-color, box-shadow;
 }
 
 .animate-flash-sell {
-  animation: flash-sell 3.5s ease-out forwards;
+  animation: flash-sell 3.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: background-color, box-shadow;
 }
 
 /* Flash animation for entire pane when order is modified - dark mode */
