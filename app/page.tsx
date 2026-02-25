@@ -318,6 +318,7 @@ function HomeContent() {
 
           return Array.from(map.values());
         });
+        if (!initialDataLoaded) setInitialDataLoaded(true);
       } else {
         const normalized = normalizeOrder({
           ...orderData,
@@ -346,7 +347,7 @@ function HomeContent() {
         }
       }
     },
-    [extractOrderData, normalizeOrder, updateOrders, selectedAccount?.address, addNotification]
+    [extractOrderData, normalizeOrder, updateOrders, selectedAccount?.address, addNotification, initialDataLoaded]
   );
 
   const { connectionState } = useWebSocket({
@@ -480,42 +481,9 @@ function HomeContent() {
     fetchPrices();
   }, []);
 
-  useEffect(() => {
-    const fetchInitialOrders = async () => {
-      try {
-        const response = await fetch(`${API_URL}/sql?limit=1000`);
-
-        if (!response.ok) {
-          console.error("Failed to fetch initial orders:", response.statusText);
-          setInitialDataLoaded(true);
-          return;
-        }
-
-        const data = await response.json();
-
-        const ordersArray = typeof data === "string" ? JSON.parse(data) : data;
-
-        if (!Array.isArray(ordersArray)) {
-          console.error("Invalid orders data format");
-          setInitialDataLoaded(true);
-          return;
-        }
-
-        const normalizedOrders = ordersArray
-          .map((order: any) => normalizeOrder(order));
-
-        if (normalizedOrders.length > 0) {
-          setOrders(normalizedOrders);
-        }
-      } catch (error) {
-        console.error("Error fetching initial orders:", error);
-      } finally {
-        setInitialDataLoaded(true);
-      }
-    };
-
-    fetchInitialOrders();
-  }, [normalizeOrder]);
+  // Reason: /ws/new auto-populates open orders on first connect, so
+  // initialDataLoaded is flipped to true on the first WS batch instead of
+  // a separate /sql?limit=1000 REST call.
 
   // Reason: Support shareable order links (?order=UUID) for private orders.
   // Fetches the specific order and injects it into the orders list.
@@ -557,6 +525,7 @@ function HomeContent() {
       const dbRecord = await fetchDbRecord(API_URL, order.escrow);
       const updatedOrderData = buildRecPayload({
         ...dbRecord,
+        ...order,
         ...updates,
         uuid: order.uuid,
         status: 1,
@@ -590,6 +559,7 @@ function HomeContent() {
       const dbRecord = await fetchDbRecord(API_URL, order.escrow);
       const closeOrderData = buildRecPayload({
         ...dbRecord,
+        ...order,
         uuid: order.uuid,
         status: 3,
       });

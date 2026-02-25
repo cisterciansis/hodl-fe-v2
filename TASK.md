@@ -84,7 +84,14 @@
 - [x] **Rename Stop Price to Floor/Ceiling Price** — Label changed from "Stop Price (TAO)" to "Floor/Ceiling Price" with updated tooltip explaining sell floor and buy ceiling behavior.
 - [x] **Block past dates in GTD calendar** — Calendar now disables dates before today to prevent users from creating orders with expired good-till-dates. BE already rejects these but FE now prevents it upfront.
 - [x] **Floor/Ceiling price vs market warnings** — Added inline amber warnings: sell orders with floor price above market, buy orders with ceiling price below market. These are warnings (not blockers) since market prices change.
+- [x] **Fill order stage 2 payload missing fields** — Same `/dbjson` template-default bug in `fill-order-modal.tsx` `handleFillOrder()`. Added `asset`, `type`, `ask`, `bid`, `stp`, `lmt`, `gtd`, `partial`, `public` from `fixedValues`/`order` to match stage 1 and review paths.
+- [x] **Modify/Close order payloads missing fields** — `page.tsx` `handleUpdateOrder()` and `handleCancelOrder()` only spread `dbRecord` (template defaults). Added `...order` spread so all existing order fields (asset, type, wallet, origin, escrow, etc.) are preserved before applying updates.
 - [x] **WebSocket connections verified** — `/ws/new?ss58=wallet` and `/ws/tap?ss58=wallet` patterns confirmed correct against BE codebase.
+
+### 2026-02-25 — Data Flow Optimization
+
+#### Completed
+- [x] **Remove initial /sql?limit=1000 fetch** — `/ws/new` now auto-populates open orders on first connect, so the separate REST call on page load was redundant. `initialDataLoaded` is now set on the first WS batch message instead. Saves one HTTP round-trip and ~bandwidth on every page load.
 
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`

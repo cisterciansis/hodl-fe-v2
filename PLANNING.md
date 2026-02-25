@@ -13,7 +13,7 @@ HODL Exchange is a decentralized order book for Bittensor Subnet 118, built with
 - **Blockchain:** Polkadot.js / Bittensor wallet extensions
 
 ### Data Flow
-- **Order Book:** Initial load via REST `/sql?limit=1000`, live updates via `/ws/new`
+- **Order Book:** Initial load + live updates via `/ws/new` (first message is full open-order batch)
 - **Prices:** Initial load via REST `/price`, live updates via `/ws/tap`
 - **TAO/Alpha/Price triplets:** Live updates via `/ws/tap` (per-escrow and subnet-wide)
 - **TAO/USD price:** Pyth Hermes SSE (EventSource)
