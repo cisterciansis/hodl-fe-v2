@@ -250,81 +250,114 @@ function HomeContent() {
   }, []);
 
   /**
-   * Normalizes WebSocket message to extract order data.
-   * Handles two formats:
-   * 1. Nested: {uuid: '...', data: {...}} or {uuid: '...', data: [...]}
-   * 2. Flat: {date: '...', uuid: '...', ...} (message itself is the order)
+   * Merge an array of row-objects into state using a uuid-keyed Map so
+   * duplicates are collapsed and terminal statuses are removed.
    */
-  const extractOrderData = useCallback(
-    (
-      message: WebSocketMessage | Order
-    ): {
-      orderData: Order | Order[];
-      messageUuid: string;
-    } | null => {
-      if (!message || typeof message !== "object") {
-        return null;
+  const mergeOrderBatch = useCallback((incoming: unknown[]) => {
+    if (incoming.length === 0) return;
+    setOrders((prev) => {
+      const map = new Map(prev.map((o) => [o.uuid, o]));
+
+      for (const raw of incoming) {
+        if (!raw || typeof raw !== "object") continue;
+        const normalized = normalizeOrder(raw);
+        if (!normalized.uuid) continue;
+
+        if (isTerminalStatus(normalized.status)) {
+          map.delete(normalized.uuid);
+        } else {
+          map.set(normalized.uuid, normalized);
+        }
       }
 
-      if ("data" in message && message.data !== undefined) {
-        const wsMessage = message as WebSocketMessage;
-        return {
-          orderData: wsMessage.data!,
-          messageUuid: wsMessage.uuid || "",
-        };
+      return Array.from(map.values());
+    });
+  }, [normalizeOrder]);
+
+  /**
+   * Converts a pandas column-oriented dict to a row-oriented array.
+   * Input:  {"date": {"0": "...", "1": "..."}, "uuid": {"0": "a", "1": "b"}, ...}
+   * Output: [{"date": "...", "uuid": "a", ...}, {"date": "...", "uuid": "b", ...}]
+   */
+  const columnsToRows = useCallback((colDict: Record<string, unknown>): Record<string, unknown>[] => {
+    const columns = Object.keys(colDict);
+    if (columns.length === 0) return [];
+
+    const firstVal = colDict[columns[0]];
+    if (!firstVal || typeof firstVal !== "object" || Array.isArray(firstVal)) return [];
+
+    const indices = Object.keys(firstVal as Record<string, unknown>);
+    if (indices.length === 0) return [];
+
+    return indices.map((idx) => {
+      const row: Record<string, unknown> = {};
+      for (const col of columns) {
+        row[col] = (colDict[col] as Record<string, unknown>)?.[idx];
       }
+      return row;
+    });
+  }, []);
 
-      if ("uuid" in message && "date" in message) {
-        return {
-          orderData: message as Order,
-          messageUuid: (message as Order).uuid || "",
-        };
-      }
-
-      return null;
-    },
-    []
-  );
-
+  /**
+   * Handles all /ws/new message shapes:
+   *  1. Raw array           — [{order}, ...]                      (records format)
+   *  2. Column-oriented dict — {col: {idx: val, ...}, ...}        (pandas to_dict())
+   *  3. Nested data          — {uuid, data: [...]} or {data: {order}}
+   *  4. Flat order object    — {uuid, date, status, ...}          (single update)
+   *  5. Empty dict           — {}                                 (no new orders)
+   */
   const handleWebSocketMessage = useCallback(
     (message: WebSocketMessage | unknown) => {
-      const extracted = extractOrderData(message as WebSocketMessage | Order);
-      if (!extracted) {
+      if (!message || typeof message !== "object") return;
+
+      // 1. Raw array (records format, or future backend update)
+      if (Array.isArray(message)) {
+        console.log("[ws/new] raw array", message.length, "items");
+        mergeOrderBatch(message);
+        if (!initialDataLoaded) setInitialDataLoaded(true);
         return;
       }
 
-      const { orderData, messageUuid } = extracted;
+      const msg = message as Record<string, unknown>;
+      const keys = Object.keys(msg);
 
-      if (Array.isArray(orderData)) {
-        setOrders((prev) => {
-          const map = new Map(prev.map((o) => [o.uuid, o]));
-
-          for (const order of orderData) {
-            const normalized = normalizeOrder({
-              ...order,
-              uuid: order.uuid || messageUuid,
-            });
-
-            if (!normalized.uuid) {
-              continue;
-            }
-
-            if (isTerminalStatus(normalized.status)) {
-              map.delete(normalized.uuid);
-            } else {
-              map.set(normalized.uuid, normalized);
-            }
-          }
-
-          return Array.from(map.values());
-        });
+      // 5. Empty dict — backend sends {} when no new orders; skip silently
+      if (keys.length === 0) {
         if (!initialDataLoaded) setInitialDataLoaded(true);
-      } else {
-        const normalized = normalizeOrder({
-          ...orderData,
-          uuid: orderData.uuid || messageUuid,
-        });
+        return;
+      }
 
+      // 2. Column-oriented pandas dict: values are {idx: val} objects, not scalars.
+      //    Detect by checking if a known order field has an object value.
+      const sampleKey = "uuid" in msg ? "uuid" : "date" in msg ? "date" : "";
+      if (sampleKey) {
+        const sample = msg[sampleKey];
+        if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
+          const rows = columnsToRows(msg);
+          console.log("[ws/new] column-oriented →", rows.length, "rows, first:", rows[0]);
+          mergeOrderBatch(rows);
+          if (!initialDataLoaded) setInitialDataLoaded(true);
+          return;
+        }
+      }
+
+      // 3. Nested {data: [...]} or {data: {order}}
+      if ("data" in msg && msg.data !== undefined) {
+        const payload = msg.data;
+        if (Array.isArray(payload)) {
+          mergeOrderBatch(payload);
+        } else if (payload && typeof payload === "object") {
+          const normalized = normalizeOrder(payload);
+          if (normalized.uuid) updateOrders(normalized);
+        }
+        if (!initialDataLoaded) setInitialDataLoaded(true);
+        return;
+      }
+
+      // 4. Flat order object (scalar uuid + date)
+      if ("uuid" in msg && "date" in msg) {
+        console.log("[ws/new] flat order", msg.uuid, "status", msg.status);
+        const normalized = normalizeOrder(msg);
         if (normalized.uuid) {
           updateOrders(normalized);
 
@@ -345,15 +378,30 @@ function HomeContent() {
             }
           }
         }
+        if (!initialDataLoaded) setInitialDataLoaded(true);
+        return;
       }
+
+      console.warn("[ws/new] unhandled message shape, keys:", keys.slice(0, 5), "sample val type:", typeof msg[keys[0]]);
     },
-    [extractOrderData, normalizeOrder, updateOrders, selectedAccount?.address, addNotification, initialDataLoaded]
+    [mergeOrderBatch, columnsToRows, normalizeOrder, updateOrders, selectedAccount?.address, addNotification, initialDataLoaded]
   );
 
+  // Reason: /ws/new (no ss58) streams ALL public orders — needed for the
+  // order book.  /ws/new?ss58=wallet only returns that wallet's orders,
+  // which is useful for "My Orders" but would leave the book empty.
   const { connectionState } = useWebSocket({
-    url: getWebSocketNewUrl(selectedAccount?.address ? { ss58: selectedAccount.address } : undefined),
+    url: getWebSocketNewUrl(),
     onMessage: handleWebSocketMessage,
   });
+
+  // Reason: If the WS connects but the initial batch never arrives (e.g. no
+  // open orders exist), unlock the loading screen after a short grace period.
+  useEffect(() => {
+    if (initialDataLoaded || connectionState !== "connected") return;
+    const timer = setTimeout(() => setInitialDataLoaded(true), 3000);
+    return () => clearTimeout(timer);
+  }, [connectionState, initialDataLoaded]);
 
   // /ws/tap - handles TAO/Alpha/Price triplet updates
   // Carries both per-escrow updates AND subnet price broadcasts
@@ -449,7 +497,7 @@ function HomeContent() {
   }, []);
 
   useWebSocket({
-    url: getWebSocketTapUrl(selectedAccount?.address ? { ss58: selectedAccount.address } : undefined),
+    url: getWebSocketTapUrl(),
     onMessage: handleTapMessage,
   });
 

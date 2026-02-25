@@ -91,7 +91,13 @@
 ### 2026-02-25 — Data Flow Optimization
 
 #### Completed
-- [x] **Remove initial /sql?limit=1000 fetch** — `/ws/new` now auto-populates open orders on first connect, so the separate REST call on page load was redundant. `initialDataLoaded` is now set on the first WS batch message instead. Saves one HTTP round-trip and ~bandwidth on every page load.
+- [x] **Remove initial /sql?limit=1000 fetch** — `/ws/new` now auto-populates open orders on first connect. Removed the REST call and refactored `handleWebSocketMessage` to handle all `/ws/new` message shapes:
+  - Column-oriented pandas dict (`df.to_dict()` format) — pivoted to rows via `columnsToRows()`
+  - Raw array (records format, future-proof)
+  - Nested `{data: [...]}` wrapper
+  - Flat single-order objects
+  - Empty `{}` (no new orders this cycle)
+  `initialDataLoaded` is set on the first WS message of any kind. Added 3s safety fallback after WS connects. Saves one HTTP round-trip per page load.
 
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`

@@ -25,6 +25,16 @@ HODL Exchange is a decentralized order book for Bittensor Subnet 118, built with
 | `/ws/new` | Order book streaming (new orders, status changes) |
 | `/ws/tap` | TAO/Alpha/Price triplet updates + subnet price broadcasts |
 
+### WebSocket Message Formats
+`/ws/new` sends pandas `df.to_dict()` (column-oriented), double-JSON-encoded via `send_json(json.dumps(...))`.
+After the WS hook's double-parse, the frontend sees one of:
+- **Column-oriented dict** — `{"date": {"0": "...", "1": "..."}, "uuid": {"0": "a", "1": "b"}, ...}` (batch)
+- **Empty dict** — `{}` (no new orders this cycle)
+- **Raw array** — `[{order}, ...]` (records format, if backend updated)
+- **Flat order** — `{uuid, date, status, ...}` (single update)
+
+`/sql` returns row-oriented JSON via `df.to_json(orient='records')`: `[{order1}, {order2}, ...]`
+
 ### Payload Contract
 All `/rec` payloads follow canonical field order with `accept` (TEXT) and `period` (BIGINT) fields.
 Payloads are built via `buildRecPayload()` in `lib/api-utils.ts` which ensures:

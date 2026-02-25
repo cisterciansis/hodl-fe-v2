@@ -59,6 +59,7 @@ export function useWebSocket({
       setConnectionState("connecting");
 
       ws.onopen = () => {
+        console.log("[WS] connected:", url);
         setConnectionState("connected");
         reconnectAttemptsRef.current = 0;
         isFirstMessageRef.current = true;
@@ -69,6 +70,7 @@ export function useWebSocket({
       };
 
       ws.onclose = (event: CloseEvent) => {
+        console.log("[WS] closed:", url, "code:", event.code);
         wsRef.current = null;
         setConnectionState("disconnected");
 
@@ -85,6 +87,7 @@ export function useWebSocket({
       };
 
       ws.onerror = (event: Event) => {
+        console.error("[WS] error:", url);
         setConnectionState("error");
 
         if (onErrorRef.current) {
@@ -117,6 +120,7 @@ export function useWebSocket({
               return;
             }
             const receivedUuid = rawData.trim();
+            console.log("[WS] uuid received:", receivedUuid, "for", url);
             if (receivedUuid) {
               setUuid(receivedUuid);
               if (onUuidReceivedRef.current) {
@@ -136,10 +140,15 @@ export function useWebSocket({
             message = JSON.parse(message);
           }
 
+          const msgType = Array.isArray(message) ? `array[${message.length}]` : typeof message;
+          const msgKeys = message && typeof message === "object" && !Array.isArray(message) ? Object.keys(message).slice(0, 5) : [];
+          console.log("[WS] msg:", msgType, msgKeys.length ? `keys=[${msgKeys}]` : "", "len:", rawData.length, "for", url);
+
           if (onMessageRef.current) {
             onMessageRef.current(message);
           }
         } catch (error) {
+          console.error("[useWebSocket] message parse error:", error, "rawData:", typeof rawData, rawData?.toString().slice(0, 200));
         }
       };
     } catch (error) {
