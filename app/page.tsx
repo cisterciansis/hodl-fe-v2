@@ -312,7 +312,6 @@ function HomeContent() {
 
       // 1. Raw array (records format, or future backend update)
       if (Array.isArray(message)) {
-        console.log("[ws/new] raw array", message.length, "items");
         mergeOrderBatch(message);
         if (!initialDataLoaded) setInitialDataLoaded(true);
         return;
@@ -334,7 +333,6 @@ function HomeContent() {
         const sample = msg[sampleKey];
         if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
           const rows = columnsToRows(msg);
-          console.log("[ws/new] column-oriented →", rows.length, "rows, first:", rows[0]);
           mergeOrderBatch(rows);
           if (!initialDataLoaded) setInitialDataLoaded(true);
           return;
@@ -356,7 +354,6 @@ function HomeContent() {
 
       // 4. Flat order object (scalar uuid + date)
       if ("uuid" in msg && "date" in msg) {
-        console.log("[ws/new] flat order", msg.uuid, "status", msg.status);
         const normalized = normalizeOrder(msg);
         if (normalized.uuid) {
           updateOrders(normalized);
@@ -382,7 +379,6 @@ function HomeContent() {
         return;
       }
 
-      console.warn("[ws/new] unhandled message shape, keys:", keys.slice(0, 5), "sample val type:", typeof msg[keys[0]]);
     },
     [mergeOrderBatch, columnsToRows, normalizeOrder, updateOrders, selectedAccount?.address, addNotification, initialDataLoaded]
   );
