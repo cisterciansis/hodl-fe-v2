@@ -141,6 +141,52 @@
 - [x] **Wallet change cleanup** — `myOrders` state and loaded flag reset when wallet address changes or disconnects. Private WS auto-reconnects to new address.
 - [x] **Optimistic updates** — `handleUpdateOrder` and `handleCancelOrder` now update both `orders` and `myOrders` states for instant UI feedback across views.
 
+### 2026-02-25 — Transaction Status UX Simplification
+
+#### Completed
+- [x] **Simplified wallet transaction status messages** — Replaced verbose chain status messages with clean 3-step flow: "Pending" (broadcast/ready) → "Confirming" (included in block) → "Confirmed" (finalized). Updated `lib/bittensor.ts` (both `transferTao` and `transferAlpha`), `hooks/useBittensorTransfer.ts` (status mapping + initial/final messages), and both order modals (fallback text + finalized banner).
+
+### 2026-02-25 — Wallet Balance Checks Before Transfer
+
+#### Completed
+- [x] **On-chain balance check before order/fill** — Created `useWalletBalance` hook that queries the Bittensor chain for the user's TAO balance (`system.account`) and Alpha balance (`/stake/{coldkey}`) on the relevant subnet. Integrated into both `new-order-modal.tsx` and `fill-order-modal.tsx`:
+  - **Proactive inline display**: Shows the user's current wallet balance below the order size input (with loading spinner while fetching)
+  - **Insufficient funds warning**: Amber warning appears immediately when the entered amount exceeds the wallet balance (e.g. "Insufficient TAO. You need 5.0000 τ but only have 2.3456 τ")
+  - **Fresh check at submission**: Right before the on-chain transfer (Step 0), `refetchBalance()` re-queries the chain for the latest balance and blocks the transfer with a clear error if insufficient
+  - Buy orders check TAO balance, sell orders check Alpha balance on the order's subnet
+
+### 2026-02-25 — Fill Order Completion UX Fix
+
+#### Completed
+- [x] **Fill Order button spinning after confirmation** — After on-chain transfer confirmed, the Fill Order button kept showing a spinner with "Fill Order" text while the backend `/rec` call was in progress. Users saw "Confirmed" but the button still spun, creating confusion about whether it was safe to close. Fixed with 3 changes:
+  - **Clear status progression**: Banner now shows "Transfer confirmed. Submitting fill order…" (blue, with spinner) during the backend call, instead of the misleading "Confirmed. Filling order..." (green, no spinner)
+  - **Button text reflects phase**: Button shows "Transferring..." during on-chain transfer, then "Submitting..." during backend call, instead of always showing "Fill Order"
+  - **Explicit success state**: Instead of immediately closing the modal on success, shows a green banner with checkmark: "Order filled successfully. You may safely close this dialog." with a single Close button (no spinner). User now has clear confirmation before dismissing.
+
+### 2026-02-25 — Order Permalinks
+
+#### Completed
+- [x] **Copy Link button** — Added "Copy Link" button to expanded row details for all orders (public and private). Copies `?order=UUID` permalink to clipboard with checkmark confirmation.
+- [x] **Permalink landing UX** — When opening a `?order=UUID` link, the order is auto-expanded, scrolled into view, and highlighted with a blue ring animation that fades after ~3.5s. Works for both public orders (already in the book) and private orders (fetched via `/sql`).
+- [x] **All view modes supported** — Permalink highlight/scroll works across desktop table, mobile card, and split view modes.
+
+### 2026-02-25 — Stale Order Status Bug Fix
+
+#### Completed
+- [x] **Cross-stream status sync** — When the My Orders WS stream (`/ws/new?ss58=wallet`) receives filled (status=2) or closed (status=3) orders, the status is now propagated to the public `orders` state. Previously the public Order Book stream (`/ws/new`) only sent open orders and never notified when they were filled, leaving stale "open" entries indefinitely.
+- [x] **UUID collision fix in batch merges** — Both `mergeOrderBatch` (public) and `mergeMyOrderBatch` (private) now prefer the record with the higher positive status when the same UUID appears multiple times in a batch (e.g. a staging status=-1 row overwriting a status=2 fill). Prevents race conditions where iteration order could revert a filled order back to open.
+- [x] **Stale parent status detection** — Added `useEffect` that detects parent orders still showing status=1 ("Open") but with filled child orders (status=2) in `publicFilledMap`. When detected, re-fetches the parent's actual status from `/sql?uuid=X` and updates both `orders` and `myOrders` state. Handles the case where the backend broadcasts the child fill order but never sends a separate status update for the parent. Deduplicates via `checkedStaleParentsRef` to avoid repeated fetches.
+
+### 2026-02-25 — Floor/Ceiling Price Validation
+
+#### Completed
+- [x] **Block invalid floor/ceiling prices** — Previously the UI showed a misleading warning ("will act as a limit order") when a sell order's floor price was above market or a buy order's ceiling price was below market, but the backend rejected these outright with 400 errors. Changed to red error messages explaining the constraint, disabled all submission buttons (Create Escrow, Review Order, Place Order) when the price is invalid, and added a safety guard inside `handleNext()` as a backstop.
+
+### 2026-02-25 — Close Order Error Handling
+
+#### Completed
+- [x] **Surface server error messages on close/modify** — `handleCancelOrder` and `handleUpdateOrder` now read the response body on non-OK (e.g. 400) responses and display the server's error message in the popup dialog instead of throwing a generic console error. Popup dialog title changed from hardcoded "Order closed" to generic "Order Update" so it works for both success and error messages.
+
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`
 

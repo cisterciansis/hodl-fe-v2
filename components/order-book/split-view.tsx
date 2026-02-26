@@ -14,6 +14,7 @@ interface SplitBookViewProps {
   expandedRowId?: string | null;
   renderSubComponent?: (order: Order) => React.ReactElement;
   walletAddress?: string;
+  highlightedRowId?: string | null;
 }
 
 function CompactRow({
@@ -25,6 +26,8 @@ function CompactRow({
   mirror,
   alignLeft,
   isOwnOrder,
+  isHighlighted,
+  rowId,
 }: {
   order: Order;
   prices: Record<number, number>;
@@ -34,6 +37,8 @@ function CompactRow({
   mirror?: boolean;
   alignLeft?: boolean;
   isOwnOrder?: boolean;
+  isHighlighted?: boolean;
+  rowId?: string;
 }) {
   const price =
     order.price > 0
@@ -50,12 +55,13 @@ function CompactRow({
   return (
     <tr
       onClick={onClick}
+      data-row-id={rowId}
       className={`cursor-pointer text-sm transition-colors hover:bg-slate-50 dark:hover:bg-muted/40 ${isNew
         ? orderType === 2
           ? "animate-flash-buy"
           : "animate-flash-sell"
         : ""
-        } ${isOwnOrder && !isNew ? "own-order-row" : ""}`}
+        } ${isHighlighted ? "animate-highlight-order" : ""} ${isOwnOrder && !isNew && !isHighlighted ? "own-order-row" : ""}`}
     >
       {mirror ? (
         <>
@@ -110,6 +116,7 @@ export function SplitBookView({
   expandedRowId,
   renderSubComponent,
   walletAddress,
+  highlightedRowId,
 }: SplitBookViewProps) {
   const { bids, asks } = React.useMemo(() => {
     const bidOrders: Order[] = [];
@@ -200,6 +207,8 @@ export function SplitBookView({
                         onClick={() => onRowClick?.(orderId)}
                         mirror
                         isOwnOrder={!!(walletAddress && order.wallet === walletAddress)}
+                        isHighlighted={highlightedRowId === orderId}
+                        rowId={orderId}
                       />
                     );
                   })
@@ -248,6 +257,8 @@ export function SplitBookView({
                         onClick={() => onRowClick?.(orderId)}
                         alignLeft
                         isOwnOrder={!!(walletAddress && order.wallet === walletAddress)}
+                        isHighlighted={highlightedRowId === orderId}
+                        rowId={orderId}
                       />
                     );
                   })

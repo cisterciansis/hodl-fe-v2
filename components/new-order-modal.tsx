@@ -45,6 +45,8 @@ import { ConnectButton } from "@/components/walletkit/connect";
 import { parseWsMessage } from "@/lib/websocket-utils";
 import { postJson, extractResponseError, readResponseBody, parseRecResponse, buildRecPayload, fetchDbRecord } from "@/lib/api-utils";
 import { useBittensorTransfer } from "@/hooks/useBittensorTransfer";
+import { MiniSpinner } from "@/components/ui/mini-spinner";
+import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { useSubnetPrice } from "@/hooks/useSubnetPrice";
 import { resolveHotkey } from "@/lib/bittensor";
 import { useTMCSubnets } from "@/hooks/useTMCSubnets";
@@ -281,6 +283,17 @@ export function NewOrderModal({
     partial: true,
     public: true,
   });
+
+  const {
+    tao: walletTaoBalance,
+    alpha: walletAlphaBalance,
+    isLoading: isBalanceLoading,
+    refetch: refetchBalance,
+  } = useWalletBalance(
+    selectedAccount?.address,
+    formData.asset,
+    open && isConnected,
+  );
   const { price: chainPrice } = useSubnetPrice(formData.asset);
   const [escrowWallet, setEscrowWallet] = React.useState<string>("");
   const [originWallet, setOriginWallet] = React.useState<string>("");
@@ -539,10 +552,27 @@ export function NewOrderModal({
     return 0;
   };
 
+  // Reason: Backend rejects sell orders with floor > market and buy orders with ceiling < market.
+  // Block submission entirely instead of showing a post-facto error.
+  const isStpInvalid =
+    formData.stp != null &&
+    formData.stp > 0 &&
+    priceForConversion > 0 &&
+    ((formData.type === 1 && formData.stp > priceForConversion) ||
+     (formData.type === 2 && formData.stp < priceForConversion));
+
   const handleNext = async () => {
     try {
       setLoading(true);
       setError("");
+
+      if (isStpInvalid) {
+        throw new Error(
+          formData.type === 1
+            ? "Floor price must be at or below the current market price"
+            : "Ceiling price must be at or above the current market price"
+        );
+      }
 
       const walletAddress = selectedAccount?.address || "";
 
@@ -656,6 +686,26 @@ export function NewOrderModal({
 
       const finalOrigin = escrowWallet.trim();
       const finalEscrow = escrowWallet.trim();
+
+      // --- Step 0: Fresh balance check before transfer ---
+      if (isConnected && selectedAccount) {
+        const freshBalances = await refetchBalance();
+        if (formData.type === 2) {
+          const taoNeeded = getTaoForSubmit();
+          if (taoNeeded > 0 && freshBalances.tao != null && taoNeeded > freshBalances.tao) {
+            throw new Error(
+              `Insufficient TAO balance. You need ${taoNeeded.toFixed(4)} τ but only have ${freshBalances.tao.toFixed(4)} τ`
+            );
+          }
+        } else if (formData.type === 1) {
+          const alphaNeeded = getAlphaForSubmit();
+          if (alphaNeeded > 0 && freshBalances.alpha != null && alphaNeeded > freshBalances.alpha) {
+            throw new Error(
+              `Insufficient Alpha balance. You need ${alphaNeeded.toFixed(4)} α but only have ${freshBalances.alpha.toFixed(4)} α`
+            );
+          }
+        }
+      }
 
       // --- Step 1: On-chain transfer to escrow ---
       // Buy order → transfer TAO to escrow
@@ -889,14 +939,14 @@ export function NewOrderModal({
         {/* On-chain transfer status indicator */}
         {isTransferring && (
           <div className="p-3 rounded-md bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-            <span>{transferStatusMessage || "Processing on-chain transfer..."}</span>
+            <MiniSpinner size={16} className="shrink-0 text-blue-600 dark:text-blue-400" />
+            <span>{transferStatusMessage || "Pending"}</span>
           </div>
         )}
         {/* transferError is now shown via the unified error display above */}
         {transferStatus === "finalized" && !isTransferring && (
           <div className="p-3 rounded-md bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm">
-            Transfer confirmed on-chain. Placing order...
+            Confirmed. Placing order...
           </div>
         )}
 
@@ -1065,6 +1115,33 @@ export function NewOrderModal({
                 </button>
               </div>
             </div>
+            {/* Wallet balance indicator + insufficient funds warning */}
+            {isConnected && formData.type != null && (() => {
+              const needsTao = formData.type === 2;
+              const requiredAmount = needsTao ? getTaoForSubmit() : getAlphaForSubmit();
+              const currentBalance = needsTao ? walletTaoBalance : walletAlphaBalance;
+              const unit = needsTao ? "TAO" : "Alpha";
+              const symbol = needsTao ? "τ" : "α";
+              if (currentBalance == null && !isBalanceLoading) return null;
+              const insufficient = currentBalance != null && requiredAmount > 0 && requiredAmount > currentBalance;
+              return (
+                <div className="mt-1 space-y-0.5">
+                  <p className="text-xs text-muted-foreground/70">
+                    {isBalanceLoading ? (
+                      <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Checking balance…</span>
+                    ) : currentBalance != null ? (
+                      <>Wallet balance: {currentBalance.toFixed(4)} {symbol}</>
+                    ) : null}
+                  </p>
+                  {insufficient && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+                      <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-80" />
+                      <span>Insufficient {unit}. You need {requiredAmount.toFixed(4)} {symbol} but only have {currentBalance!.toFixed(4)} {symbol}.</span>
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* order type */}
@@ -1197,15 +1274,15 @@ export function NewOrderModal({
               Market Price {priceForConversion > 0 ? priceForConversion.toFixed(6) : "0.000000"}
             </p>
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 1 && formData.stp > priceForConversion && (
-              <p className="text-sm text-muted-foreground flex items-start gap-1.5">
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-60" />
-                <span>Your floor price is above the current market price. This order will act as a limit order and fill once the market reaches your target.</span>
+              <p className="text-sm text-red-600 dark:text-red-400 flex items-start gap-1.5">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>Floor price must be at or below the current market price ({priceForConversion.toFixed(6)}). Lower your floor price to proceed.</span>
               </p>
             )}
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 2 && formData.stp < priceForConversion && (
-              <p className="text-sm text-muted-foreground flex items-start gap-1.5">
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-60" />
-                <span>Your ceiling price is below the current market price. This order will act as a limit order and fill once the market reaches your target.</span>
+              <p className="text-sm text-red-600 dark:text-red-400 flex items-start gap-1.5">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>Ceiling price must be at or above the current market price ({priceForConversion.toFixed(6)}). Raise your ceiling price to proceed.</span>
               </p>
             )}
           </div>
@@ -1355,7 +1432,7 @@ export function NewOrderModal({
               </Button>
               <Button
                 onClick={handleNext}
-                disabled={loading || !wsUuid}
+                disabled={loading || !wsUuid || isStpInvalid}
                 className="bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold shadow-[0_4px_14px_0_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_0_rgba(37,99,235,0.4)]"
               >
                 {(loading || (!wsUuid && open)) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1374,7 +1451,7 @@ export function NewOrderModal({
               <Button
                 variant={isInReviewMode ? "outline" : undefined}
                 onClick={isInReviewMode ? handleReviewOrder : handlePlaceOrder}
-                disabled={loading || isTransferring}
+                disabled={loading || isTransferring || (isInReviewMode && isStpInvalid)}
                 className={isInReviewMode ? "" : "bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold shadow-[0_4px_14px_0_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_0_rgba(37,99,235,0.4)]"}
               >
                 {(loading || isTransferring) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1391,6 +1468,7 @@ export function NewOrderModal({
             </Button>
             <Button
               onClick={handleReviewOrder}
+              disabled={isStpInvalid}
               className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
             >
               Review Order

@@ -155,7 +155,7 @@ export async function transferTao(
 
   const raoAmount = taoToRao(taoAmount);
 
-  onStatusChange?.('Preparing transfer transaction...');
+  onStatusChange?.('Preparing transaction...');
 
   // balances.transferKeepAlive keeps the sender account alive (minimum existential deposit)
   const transfer = api.tx.balances.transferKeepAlive(toAddress, raoAmount);
@@ -167,15 +167,13 @@ export async function transferTao(
 
     transfer
       .signAndSend(fromAddress, { signer: signer as never }, (result) => {
-        const statusType = result.status.type;
-        onStatusChange?.(`Transaction status: ${statusType}`);
-
-        if (result.status.isInBlock) {
-          onStatusChange?.('Transaction included in block, waiting for finalization...');
+        if (result.status.isReady || result.status.isBroadcast) {
+          onStatusChange?.('Pending');
+        } else if (result.status.isInBlock) {
+          onStatusChange?.('Confirming');
         }
 
         if (result.status.isFinalized) {
-          // Check for dispatch errors
           const dispatchError = result.dispatchError;
           if (dispatchError) {
             let errorMessage = 'Transaction failed';
@@ -195,7 +193,6 @@ export async function transferTao(
           }
         }
 
-        // Handle errors that prevent inclusion
         if (result.isError) {
           unsub?.();
           reject(new Error('Transaction failed to submit'));
@@ -205,7 +202,6 @@ export async function transferTao(
         unsub = unsubFn;
       })
       .catch((err) => {
-        // User rejected the signing request
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('Rejected') || msg.includes('Cancelled') || msg.includes('cancelled')) {
           reject(new Error('Transaction signing was cancelled by the user'));
@@ -383,7 +379,7 @@ export async function transferAlpha(
   // Alpha uses the same 9-decimal precision as TAO (rao units)
   const raoAmount = taoToRao(alphaAmount);
 
-  onStatusChange?.('Preparing alpha transfer transaction...');
+  onStatusChange?.('Preparing transaction...');
 
   // subtensorModule.transferStake(destination_coldkey, hotkey, origin_netuid, destination_netuid, alpha_amount)
   // Both netuids are the same for same-subnet transfer (matching backend: netuid, netuid)
@@ -407,11 +403,10 @@ export async function transferAlpha(
 
     transfer
       .signAndSend(fromAddress, { signer: signer as never }, (result) => {
-        const statusType = result.status.type;
-        onStatusChange?.(`Transaction status: ${statusType}`);
-
-        if (result.status.isInBlock) {
-          onStatusChange?.('Transaction included in block, waiting for finalization...');
+        if (result.status.isReady || result.status.isBroadcast) {
+          onStatusChange?.('Pending');
+        } else if (result.status.isInBlock) {
+          onStatusChange?.('Confirming');
         }
 
         if (result.status.isFinalized) {

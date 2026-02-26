@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ExternalLink,
   CalendarIcon,
+  Link,
 } from "lucide-react";
 import {
   formatDate,
@@ -92,6 +93,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
   const [copiedFilledEscrowIds, setCopiedFilledEscrowIds] = React.useState<
     Set<string>
   >(new Set());
+  const [copiedLink, setCopiedLink] = React.useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
   const [isFillOrderModalOpen, setIsFillOrderModalOpen] = React.useState(false);
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = React.useState(false);
@@ -215,6 +217,29 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
           <h3 className="text-sm sm:text-base font-semibold tracking-tight text-foreground">
             Order Details
           </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 sm:h-9 gap-1.5 sm:gap-2 text-xs sm:text-sm bg-white dark:!bg-[#293641] text-slate-900 dark:text-foreground hover:bg-slate-50 dark:hover:!bg-accent transition-all"
+            onClick={async (e) => {
+              e.stopPropagation();
+              const url = `${window.location.origin}?order=${order.uuid}`;
+              try {
+                await navigator.clipboard.writeText(url);
+                setCopiedLink(true);
+                setTimeout(() => setCopiedLink(false), 2000);
+              } catch (err) {
+                console.error("Failed to copy link:", err);
+              }
+            }}
+          >
+            {copiedLink ? (
+              <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Link className="h-3.5 w-3.5" />
+            )}
+            {copiedLink ? "Copied!" : "Copy Link"}
+          </Button>
           {order.status === 1 && isOwner && (
             <>
               <Dialog

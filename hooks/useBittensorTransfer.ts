@@ -54,11 +54,17 @@ export function useBittensorTransfer() {
   const handleStatusChange = useCallback((message: string) => {
     setState((prev) => {
       let status: TransferStatus = prev.status;
-      if (message.includes('Connecting')) status = 'connecting';
-      else if (message.includes('Waiting for wallet')) status = 'signing';
-      else if (message.includes('Ready') || message.includes('Broadcast')) status = 'broadcasting';
-      else if (message.includes('included in block')) status = 'in_block';
-      else if (message.includes('Finalized')) status = 'finalized';
+      if (message.includes('Connecting') || message.includes('Looking up') || message.includes('Preparing')) {
+        status = 'connecting';
+      } else if (message.includes('Waiting for wallet')) {
+        status = 'signing';
+      } else if (message === 'Pending') {
+        status = 'broadcasting';
+      } else if (message === 'Confirming') {
+        status = 'in_block';
+      } else if (message.includes('Finalized')) {
+        status = 'finalized';
+      }
       return { ...prev, status, statusMessage: message };
     });
   }, []);
@@ -89,7 +95,7 @@ export function useBittensorTransfer() {
       transferringRef.current = true;
       setState({
         status: 'connecting',
-        statusMessage: 'Initiating TAO transfer...',
+        statusMessage: 'Pending',
         error: null,
         result: null,
         isTransferring: true,
@@ -106,7 +112,7 @@ export function useBittensorTransfer() {
 
         setState({
           status: 'finalized',
-          statusMessage: `Transfer complete! TX: ${result.txHash.slice(0, 10)}...`,
+          statusMessage: 'Confirmed',
           error: null,
           result,
           isTransferring: false,
@@ -157,7 +163,7 @@ export function useBittensorTransfer() {
       transferringRef.current = true;
       setState({
         status: 'connecting',
-        statusMessage: 'Initiating Alpha transfer...',
+        statusMessage: 'Pending',
         error: null,
         result: null,
         isTransferring: true,
@@ -175,7 +181,7 @@ export function useBittensorTransfer() {
 
         setState({
           status: 'finalized',
-          statusMessage: `Transfer complete! TX: ${result.txHash.slice(0, 10)}...`,
+          statusMessage: 'Confirmed',
           error: null,
           result,
           isTransferring: false,

@@ -25,6 +25,8 @@ interface OrderBookProps {
   onPauseChange?: (paused: boolean) => void;
   subnetNames?: Record<number, string>;
   ofm?: [number, number, number];
+  highlightedOrderId?: string | null;
+  onHighlightComplete?: () => void;
 }
 
 export function OrderBook({
@@ -45,6 +47,8 @@ export function OrderBook({
   onPauseChange,
   subnetNames = {},
   ofm,
+  highlightedOrderId,
+  onHighlightComplete,
 }: OrderBookProps) {
   // Memoize columns so they don't recreate on every render
   const memoizedColumns = React.useMemo(() => columns(prices), [prices]);
@@ -106,6 +110,8 @@ export function OrderBook({
       prices={prices}
       onPauseChange={onPauseChange}
       subnetNames={subnetNames}
+      highlightedOrderId={highlightedOrderId}
+      onHighlightComplete={onHighlightComplete}
     />
   );
 }

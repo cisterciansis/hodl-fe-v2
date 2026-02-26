@@ -319,6 +319,40 @@ button[name="next-month"] {
   will-change: background-color, box-shadow;
 }
 
+/* Permalink highlight — neutral blue ring that pulses then fades */
+@keyframes highlight-order {
+  0% {
+    background-color: rgb(59 130 246 / 0.18);
+    box-shadow:
+      inset 0 0 0 1.5px rgb(59 130 246 / 0.45),
+      0 0 12px 2px rgb(59 130 246 / 0.15);
+  }
+
+  30% {
+    background-color: rgb(59 130 246 / 0.12);
+    box-shadow:
+      inset 0 0 0 1.5px rgb(59 130 246 / 0.3),
+      0 0 8px 1px rgb(59 130 246 / 0.1);
+  }
+
+  60% {
+    background-color: rgb(59 130 246 / 0.08);
+    box-shadow:
+      inset 0 0 0 1px rgb(59 130 246 / 0.2),
+      0 0 4px 0 rgb(59 130 246 / 0.06);
+  }
+
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.animate-highlight-order {
+  animation: highlight-order 3.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: background-color, box-shadow;
+}
+
 /* Flash animation for entire pane when order is modified - dark mode */
 @keyframes flash-pane {
   0% {
@@ -774,9 +808,9 @@ button[name="next-month"] {
   line-height: 1;
   padding: 2px 5px;
   border-radius: 2px;
-  border: 1.5px solid rgb(251 191 36 / 0.5);
-  background: rgb(251 191 36 / 0.08);
-  color: rgb(217 119 6);
+  border: 1.5px solid rgb(148 163 184 / 0.45);
+  background: rgb(148 163 184 / 0.08);
+  color: rgb(100 116 139);
   image-rendering: pixelated;
   -webkit-font-smoothing: none;
   position: relative;
@@ -785,26 +819,26 @@ button[name="next-month"] {
 }
 
 .dark .own-order-badge {
-  border-color: rgb(251 191 36 / 0.35);
-  background: rgb(251 191 36 / 0.06);
-  color: rgb(252 211 77);
+  border-color: rgb(148 163 184 / 0.3);
+  background: rgb(148 163 184 / 0.06);
+  color: rgb(203 213 225);
 }
 
 @keyframes own-badge-glow {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgb(251 191 36 / 0);
+    box-shadow: 0 0 0 0 rgb(148 163 184 / 0);
   }
   50% {
-    box-shadow: 0 0 4px 0 rgb(251 191 36 / 0.2);
+    box-shadow: 0 0 4px 0 rgb(148 163 184 / 0.15);
   }
 }
 
 .own-order-row {
-  background: rgb(251 191 36 / 0.03) !important;
+  background: rgb(148 163 184 / 0.03) !important;
 }
 
 .dark .own-order-row {
-  background: rgb(251 191 36 / 0.02) !important;
+  background: rgb(148 163 184 / 0.02) !important;
 }
 
 /* ============================================================

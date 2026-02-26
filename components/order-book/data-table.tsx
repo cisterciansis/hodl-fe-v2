@@ -80,6 +80,8 @@ interface DataTableProps<TData, TValue> {
   prices?: Record<number, number>;
   onPauseChange?: (paused: boolean) => void;
   subnetNames?: Record<number, string>;
+  highlightedOrderId?: string | null;
+  onHighlightComplete?: () => void;
 }
 
 export function DataTable<TData, TValue>({
@@ -97,6 +99,8 @@ export function DataTable<TData, TValue>({
   prices = {},
   onPauseChange,
   subnetNames = {},
+  highlightedOrderId,
+  onHighlightComplete,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [isLivePaused, setIsLivePaused] = React.useState(false);
@@ -119,6 +123,8 @@ export function DataTable<TData, TValue>({
   const [isMobileView, setIsMobileView] = React.useState(false);
   const [isSplitView, setIsSplitView] = React.useState(false);
   const [splitExpandedRowId, setSplitExpandedRowId] = React.useState<string | null>(null);
+  const [activeHighlightId, setActiveHighlightId] = React.useState<string | null>(null);
+  const highlightHandledRef = React.useRef<string | null>(null);
 
   const { subnetNames: tmcSubnetNames } = useTMCSubnets();
   const filterSubnetOptions = React.useMemo(() => {
@@ -430,6 +436,42 @@ export function DataTable<TData, TValue>({
     state: { sorting, columnFilters, expanded },
   });
 
+  // Reason: When a permalink ?order=UUID lands, find the matching row,
+  // auto-expand it, scroll it into view, and apply a highlight animation.
+  React.useEffect(() => {
+    if (!highlightedOrderId || highlightHandledRef.current === highlightedOrderId) return;
+
+    const allOrders = filteredData as any[];
+    const matchingOrder = allOrders.find((o) => o.uuid === highlightedOrderId);
+    if (!matchingOrder) return;
+    highlightHandledRef.current = highlightedOrderId;
+
+    const rowId = `${matchingOrder.uuid}-${matchingOrder.status}-${matchingOrder.escrow || ""}`;
+
+    if (isSplitView && !isSearchActive && !showMyOrdersOnly) {
+      setSplitExpandedRowId(rowId);
+    } else {
+      const newExpanded: Record<string, boolean> = {};
+      expandedIdsRef.current.forEach((id) => { newExpanded[id] = false; });
+      newExpanded[rowId] = true;
+      expandedIdsRef.current = new Set([rowId]);
+      setExpanded(newExpanded);
+    }
+
+    setActiveHighlightId(rowId);
+
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-row-id="${CSS.escape(rowId)}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    const timer = setTimeout(() => {
+      setActiveHighlightId(null);
+      onHighlightComplete?.();
+    }, 3800);
+    return () => clearTimeout(timer);
+  }, [highlightedOrderId, filteredData, isSplitView, isSearchActive, showMyOrdersOnly, onHighlightComplete]);
+
   const rows = table.getRowModel().rows;
   return (
     <div className="w-full smooth-scroll">
@@ -717,6 +759,7 @@ export function DataTable<TData, TValue>({
               }}
               renderSubComponent={renderSplitSubComponent as any}
               walletAddress={walletAddress}
+              highlightedRowId={activeHighlightId}
             />
           ) : isMobileView ? (
             <div className="divide-y divide-slate-100 dark:divide-border/40">
@@ -737,12 +780,15 @@ export function DataTable<TData, TValue>({
                       ? "animate-flash-buy"
                       : "animate-flash-sell"
                     : "";
-                  const isOwnOrderMobile = !!(walletAddress && order.wallet === walletAddress);
+                  const isOwnOrderMobile = !showMyOrdersOnly && !!(walletAddress && order.wallet === walletAddress);
+
+                  const highlightClass = activeHighlightId === row.id ? "animate-highlight-order" : "";
 
                   return (
                     <React.Fragment key={row.id}>
                       <div
-                        className={`px-3 py-3 cursor-pointer active:bg-slate-100 dark:active:bg-muted/50 ${isExpanded ? "bg-slate-50 dark:bg-muted/30" : ""} ${flashClass} ${isOwnOrderMobile && !flashClass ? "own-order-row" : ""}`}
+                        data-row-id={row.id}
+                        className={`px-3 py-3 cursor-pointer active:bg-slate-100 dark:active:bg-muted/50 ${isExpanded ? "bg-slate-50 dark:bg-muted/30" : ""} ${flashClass} ${highlightClass} ${isOwnOrderMobile && !flashClass && !highlightClass ? "own-order-row" : ""}`}
                         onClick={() => handleRowClick(row.id, isExpanded)}
                       >
                         <div className="flex items-center justify-between mb-2">
@@ -834,18 +880,19 @@ export function DataTable<TData, TValue>({
               <TableBody>
                 {table.getRowModel().rows?.length ? (
                   table.getRowModel().rows.map((row) => {
-                    const isOwnOrder = !!(walletAddress && (row.original as any).wallet === walletAddress);
+                    const isOwnOrder = !showMyOrdersOnly && !!(walletAddress && (row.original as any).wallet === walletAddress);
                     return (
                     <React.Fragment key={row.id}>
                       <TableRow
                         data-state={row.getIsSelected() && "selected"}
                         data-expanded={row.getIsExpanded()}
+                        data-row-id={row.id}
                         className={`cursor-pointer ${newlyAddedOrderIds.has(row.id) ? "" : "transition-colors bg-white dark:bg-transparent"} data-[expanded=true]:bg-slate-50 dark:data-[expanded=true]:bg-muted/30 ${newlyAddedOrderIds.has(row.id)
                           ? newlyAddedOrderIds.get(row.id) === 2
                             ? "animate-flash-buy"
                             : "animate-flash-sell"
                           : ""
-                          } ${isOwnOrder && !newlyAddedOrderIds.has(row.id) ? "own-order-row" : ""}`}
+                          } ${activeHighlightId === row.id ? "animate-highlight-order" : ""} ${isOwnOrder && !newlyAddedOrderIds.has(row.id) && activeHighlightId !== row.id ? "own-order-row" : ""}`}
                         onClick={() => handleRowClick(row.id, row.getIsExpanded())}
                       >
                         {row.getVisibleCells().map((cell, cellIdx) => (

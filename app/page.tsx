@@ -67,6 +67,7 @@ function HomeContent() {
   const [showLoading, setShowLoading] = useState(true);
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const [myOrdersLoaded, setMyOrdersLoaded] = useState(false);
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const [subnetNames, setSubnetNames] = useState<Record<number, string>>({});
   const isLivePausedRef = useRef(false);
@@ -273,6 +274,12 @@ function HomeContent() {
         if (isTerminalStatus(normalized.status)) {
           map.delete(normalized.uuid);
         } else {
+          // Reason: Skip incoming record if existing has a more terminal positive status,
+          // preventing a stale status=1 row from overwriting a status=2 fill.
+          if (existing) {
+            if (normalized.status <= 0 && existing.status > 0) continue;
+            if (normalized.status > 0 && existing.status > 0 && normalized.status < existing.status) continue;
+          }
           if (
             shouldAnimateNewRows &&
             normalized.status === 1 &&
@@ -315,6 +322,9 @@ function HomeContent() {
   /**
    * Merge a batch into myOrders state. Unlike mergeOrderBatch, keeps terminal
    * statuses (filled/closed) since the My Orders view shows all statuses.
+   * When multiple records share the same UUID (e.g. staging + final), the
+   * record with the higher positive status wins to prevent a stale status=1
+   * row from overwriting a status=2 fill.
    */
   const mergeMyOrderBatch = useCallback((incoming: unknown[]) => {
     if (incoming.length === 0) return;
@@ -324,6 +334,13 @@ function HomeContent() {
         if (!raw || typeof raw !== "object") continue;
         const normalized = normalizeOrder(raw);
         if (!normalized.uuid) continue;
+        const existing = map.get(normalized.uuid);
+        if (existing) {
+          // Reason: Backend batches can contain multiple rows per UUID (staging + final).
+          // Skip incoming record if existing has a more terminal positive status.
+          if (normalized.status <= 0 && existing.status > 0) continue;
+          if (normalized.status > 0 && existing.status > 0 && normalized.status < existing.status) continue;
+        }
         map.set(normalized.uuid, normalized);
       }
       return Array.from(map.values());
@@ -349,6 +366,36 @@ function HomeContent() {
       return [updatedOrder, ...prev];
     });
   }, []);
+
+  /**
+   * Cross-stream sync: propagate filled/closed status from the My Orders
+   * WS stream to the public `orders` state so the Order Book view doesn't
+   * show stale "open" entries after a fill.
+   */
+  const syncToPublicOrders = useCallback((incoming: unknown[]) => {
+    const updates: Order[] = [];
+    for (const raw of incoming) {
+      if (!raw || typeof raw !== "object") continue;
+      const normalized = normalizeOrder(raw);
+      if (normalized.uuid && (normalized.status === 2 || normalized.status === 3)) {
+        updates.push(normalized);
+      }
+    }
+    if (updates.length === 0) return;
+    const updateMap = new Map(updates.map((o) => [o.uuid, o]));
+    setOrders((prev) => {
+      let changed = false;
+      const next = prev.map((o) => {
+        const update = updateMap.get(o.uuid);
+        if (update && o.status !== update.status) {
+          changed = true;
+          return { ...o, ...update };
+        }
+        return o;
+      });
+      return changed ? next : prev;
+    });
+  }, [normalizeOrder]);
 
   /**
    * Converts a pandas column-oriented dict to a row-oriented array.
@@ -460,6 +507,7 @@ function HomeContent() {
 
       if (Array.isArray(message)) {
         mergeMyOrderBatch(message);
+        syncToPublicOrders(message);
         if (!myOrdersLoaded) setMyOrdersLoaded(true);
         return;
       }
@@ -478,6 +526,7 @@ function HomeContent() {
         if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
           const rows = columnsToRows(msg);
           mergeMyOrderBatch(rows);
+          syncToPublicOrders(rows);
           if (!myOrdersLoaded) setMyOrdersLoaded(true);
           return;
         }
@@ -487,9 +536,15 @@ function HomeContent() {
         const payload = msg.data;
         if (Array.isArray(payload)) {
           mergeMyOrderBatch(payload);
+          syncToPublicOrders(payload);
         } else if (payload && typeof payload === "object") {
           const normalized = normalizeOrder(payload);
-          if (normalized.uuid) updateMyOrder(normalized);
+          if (normalized.uuid) {
+            updateMyOrder(normalized);
+            if (normalized.status === 2 || normalized.status === 3) {
+              syncToPublicOrders([payload]);
+            }
+          }
         }
         if (!myOrdersLoaded) setMyOrdersLoaded(true);
         return;
@@ -499,6 +554,9 @@ function HomeContent() {
         const normalized = normalizeOrder(msg);
         if (normalized.uuid) {
           updateMyOrder(normalized);
+          if (normalized.status === 2 || normalized.status === 3) {
+            syncToPublicOrders([msg]);
+          }
           if (normalized.status === 2) {
             addNotification({
               type: "filled",
@@ -517,7 +575,7 @@ function HomeContent() {
         return;
       }
     },
-    [mergeMyOrderBatch, columnsToRows, normalizeOrder, updateMyOrder, addNotification, myOrdersLoaded]
+    [mergeMyOrderBatch, syncToPublicOrders, columnsToRows, normalizeOrder, updateMyOrder, addNotification, myOrdersLoaded]
   );
 
   const { connectionState: myOrdersConnectionState } = useWebSocket({
@@ -736,14 +794,17 @@ function HomeContent() {
   // initialDataLoaded is flipped to true on the first WS batch instead of
   // a separate /sql?limit=1000 REST call.
 
-  // Reason: Support shareable order links (?order=UUID) for private orders.
-  // Fetches the specific order and injects it into the orders list.
+  // Reason: Support shareable order links (?order=UUID) for both public and private orders.
+  // If the order is already in the book, just highlights it. Otherwise fetches and injects it.
   useEffect(() => {
     const orderUuid = searchParams.get("order");
     if (!orderUuid || !initialDataLoaded) return;
 
     const alreadyExists = orders.some((o) => o.uuid === orderUuid);
-    if (alreadyExists) return;
+    if (alreadyExists) {
+      setHighlightedOrderId(orderUuid);
+      return;
+    }
 
     const fetchSharedOrder = async () => {
       try {
@@ -761,6 +822,7 @@ function HomeContent() {
             });
           }
         }
+        setHighlightedOrderId(orderUuid);
       } catch (error) {
         console.error("Error fetching shared order:", error);
       }
@@ -784,7 +846,16 @@ function HomeContent() {
       });
 
       const response = await postJson(`${API_URL}/rec`, updatedOrderData);
-      if (!response.ok) throw new Error("Failed to update order");
+
+      if (!response.ok) {
+        let errorMsg = "Failed to update order";
+        try {
+          const body = await response.text();
+          if (body) errorMsg = body;
+        } catch { /* use default */ }
+        setRecPopupMessage(errorMsg);
+        return;
+      }
 
       try {
         const data = await response.json();
@@ -819,7 +890,16 @@ function HomeContent() {
       });
 
       const response = await postJson(`${API_URL}/rec`, closeOrderData);
-      if (!response.ok) throw new Error("Failed to close order");
+
+      if (!response.ok) {
+        let errorMsg = "Failed to close order";
+        try {
+          const body = await response.text();
+          if (body) errorMsg = body;
+        } catch { /* use default */ }
+        setRecPopupMessage(errorMsg);
+        return;
+      }
 
       try {
         const data = await response.json();
@@ -901,6 +981,50 @@ function HomeContent() {
       new Date(b.date).getTime() - new Date(a.date).getTime()
     );
   }, [myOrders, publicOpenOrders, showMyOrdersOnly]);
+
+  // Reason: The public WS stream may broadcast a child fill order (status=2 with
+  // origin=parentUuid) without ever sending a status update for the parent itself.
+  // Detect this inconsistency (parent status=1 but has filled children) and re-fetch
+  // the parent's actual status from the backend so the UI reflects "Filled".
+  const checkedStaleParentsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const staleUuids: string[] = [];
+    const allOpen = [...publicOpenOrders, ...myOpenOrders];
+    const seen = new Set<string>();
+
+    for (const parent of allOpen) {
+      if (seen.has(parent.uuid) || checkedStaleParentsRef.current.has(parent.uuid)) continue;
+      seen.add(parent.uuid);
+      if (publicFilledMap[parent.uuid]?.length > 0) {
+        staleUuids.push(parent.uuid);
+      }
+    }
+
+    if (staleUuids.length === 0) return;
+
+    for (const uuid of staleUuids) {
+      checkedStaleParentsRef.current.add(uuid);
+      fetch(`${API_URL}/sql?uuid=${uuid}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data) return;
+          const parsed = typeof data === "string" ? JSON.parse(data) : data;
+          const arr = Array.isArray(parsed) ? parsed : [parsed];
+          for (const raw of arr) {
+            if (raw?.uuid !== uuid) continue;
+            const norm = normalizeOrder(raw);
+            if (norm.status < 2) continue;
+            setOrders((prev) =>
+              prev.map((o) => (o.uuid === uuid ? { ...o, ...norm } : o))
+            );
+            setMyOrders((prev) =>
+              prev.map((o) => (o.uuid === uuid ? { ...o, ...norm } : o))
+            );
+          }
+        })
+        .catch(() => {});
+    }
+  }, [publicOpenOrders, myOpenOrders, publicFilledMap, normalizeOrder]);
 
   return (
     <>
@@ -1057,6 +1181,8 @@ function HomeContent() {
           onPauseChange={handleLivePauseChange}
           subnetNames={subnetNames}
           ofm={ofm}
+          highlightedOrderId={highlightedOrderId}
+          onHighlightComplete={() => setHighlightedOrderId(null)}
         />
 
         <NewOrderModal
@@ -1094,7 +1220,7 @@ function HomeContent() {
         <Dialog open={!!recPopupMessage} onOpenChange={(open) => { if (!open) setRecPopupMessage(""); }}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Order closed</DialogTitle>
+              <DialogTitle>Order Update</DialogTitle>
               <DialogDescription>{recPopupMessage}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
