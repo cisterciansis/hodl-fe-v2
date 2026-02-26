@@ -716,6 +716,7 @@ export function DataTable<TData, TValue>({
                 setSplitExpandedRowId((prev) => (prev === orderId ? null : orderId));
               }}
               renderSubComponent={renderSplitSubComponent as any}
+              walletAddress={walletAddress}
             />
           ) : isMobileView ? (
             <div className="divide-y divide-slate-100 dark:divide-border/40">
@@ -736,11 +737,12 @@ export function DataTable<TData, TValue>({
                       ? "animate-flash-buy"
                       : "animate-flash-sell"
                     : "";
+                  const isOwnOrderMobile = !!(walletAddress && order.wallet === walletAddress);
 
                   return (
                     <React.Fragment key={row.id}>
                       <div
-                        className={`px-3 py-3 cursor-pointer active:bg-slate-100 dark:active:bg-muted/50 ${isExpanded ? "bg-slate-50 dark:bg-muted/30" : ""} ${flashClass}`}
+                        className={`px-3 py-3 cursor-pointer active:bg-slate-100 dark:active:bg-muted/50 ${isExpanded ? "bg-slate-50 dark:bg-muted/30" : ""} ${flashClass} ${isOwnOrderMobile && !flashClass ? "own-order-row" : ""}`}
                         onClick={() => handleRowClick(row.id, isExpanded)}
                       >
                         <div className="flex items-center justify-between mb-2">
@@ -754,6 +756,11 @@ export function DataTable<TData, TValue>({
                             >
                               {orderType}
                             </Badge>
+                            {isOwnOrderMobile && (
+                              <span className="own-order-badge font-[family-name:var(--font-geist-pixel-circle)]">
+                                YOU
+                              </span>
+                            )}
                             {order.asset > 0 && (
                               <span className="font-mono text-xs text-muted-foreground">SN{order.asset}</span>
                             )}
@@ -826,7 +833,9 @@ export function DataTable<TData, TValue>({
 
               <TableBody>
                 {table.getRowModel().rows?.length ? (
-                  table.getRowModel().rows.map((row) => (
+                  table.getRowModel().rows.map((row) => {
+                    const isOwnOrder = !!(walletAddress && (row.original as any).wallet === walletAddress);
+                    return (
                     <React.Fragment key={row.id}>
                       <TableRow
                         data-state={row.getIsSelected() && "selected"}
@@ -836,18 +845,25 @@ export function DataTable<TData, TValue>({
                             ? "animate-flash-buy"
                             : "animate-flash-sell"
                           : ""
-                          }`}
+                          } ${isOwnOrder && !newlyAddedOrderIds.has(row.id) ? "own-order-row" : ""}`}
                         onClick={() => handleRowClick(row.id, row.getIsExpanded())}
                       >
-                        {row.getVisibleCells().map((cell) => (
+                        {row.getVisibleCells().map((cell, cellIdx) => (
                           <TableCell
                             key={cell.id}
                             style={{ width: cell.column.getSize() }}
                           >
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
+                            <div className={cellIdx === 0 && isOwnOrder ? "flex items-center gap-1.5" : ""}>
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext()
+                              )}
+                              {cellIdx === 0 && isOwnOrder && (
+                                <span className="own-order-badge font-[family-name:var(--font-geist-pixel-circle)]">
+                                  YOU
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                         ))}
                       </TableRow>
@@ -863,7 +879,7 @@ export function DataTable<TData, TValue>({
                         </TableRow>
                       )}
                     </React.Fragment>
-                  ))
+                  );})
                 ) : (
                   <TableRow>
                     <TableCell

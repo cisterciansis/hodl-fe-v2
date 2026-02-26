@@ -13,6 +13,7 @@ interface SplitBookViewProps {
   onRowClick?: (orderId: string) => void;
   expandedRowId?: string | null;
   renderSubComponent?: (order: Order) => React.ReactElement;
+  walletAddress?: string;
 }
 
 function CompactRow({
@@ -23,6 +24,7 @@ function CompactRow({
   onClick,
   mirror,
   alignLeft,
+  isOwnOrder,
 }: {
   order: Order;
   prices: Record<number, number>;
@@ -31,6 +33,7 @@ function CompactRow({
   onClick: () => void;
   mirror?: boolean;
   alignLeft?: boolean;
+  isOwnOrder?: boolean;
 }) {
   const price =
     order.price > 0
@@ -44,23 +47,6 @@ function CompactRow({
 
   const alignClass = alignLeft ? "text-left" : "text-right";
 
-  const cells = (
-    <>
-      <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
-        {formatPrice(price)}
-      </td>
-      <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
-        {formatTao(taoValue)}
-      </td>
-      <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
-        {formatNumber(alphaValue)}
-      </td>
-      <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 ${alignClass}`}>
-        <span className="font-mono text-[11px] sm:text-xs">SN{order.asset}</span>
-      </td>
-    </>
-  );
-
   return (
     <tr
       onClick={onClick}
@@ -69,12 +55,15 @@ function CompactRow({
           ? "animate-flash-buy"
           : "animate-flash-sell"
         : ""
-        }`}
+        } ${isOwnOrder && !isNew ? "own-order-row" : ""}`}
     >
       {mirror ? (
         <>
           <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 ${alignClass}`}>
-            <span className="font-mono text-[11px] sm:text-xs">SN{order.asset}</span>
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono text-[11px] sm:text-xs">SN{order.asset}</span>
+              {isOwnOrder && <span className="own-order-badge font-[family-name:var(--font-geist-pixel-circle)]">YOU</span>}
+            </span>
           </td>
           <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
             {formatNumber(alphaValue)}
@@ -87,7 +76,23 @@ function CompactRow({
           </td>
         </>
       ) : (
-        cells
+        <>
+          <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
+            {formatPrice(price)}
+          </td>
+          <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
+            {formatTao(taoValue)}
+          </td>
+          <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 font-mono tabular-nums text-xs sm:text-sm ${alignClass}`}>
+            {formatNumber(alphaValue)}
+          </td>
+          <td className={`px-1.5 sm:px-3 py-1.5 sm:py-2 ${alignClass}`}>
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono text-[11px] sm:text-xs">SN{order.asset}</span>
+              {isOwnOrder && <span className="own-order-badge font-[family-name:var(--font-geist-pixel-circle)]">YOU</span>}
+            </span>
+          </td>
+        </>
       )}
     </tr>
   );
@@ -104,6 +109,7 @@ export function SplitBookView({
   onRowClick,
   expandedRowId,
   renderSubComponent,
+  walletAddress,
 }: SplitBookViewProps) {
   const { bids, asks } = React.useMemo(() => {
     const bidOrders: Order[] = [];
@@ -193,6 +199,7 @@ export function SplitBookView({
                         orderType={newlyAddedOrderIds.get(orderId) ?? order.type}
                         onClick={() => onRowClick?.(orderId)}
                         mirror
+                        isOwnOrder={!!(walletAddress && order.wallet === walletAddress)}
                       />
                     );
                   })
@@ -240,6 +247,7 @@ export function SplitBookView({
                         orderType={newlyAddedOrderIds.get(orderId) ?? order.type}
                         onClick={() => onRowClick?.(orderId)}
                         alignLeft
+                        isOwnOrder={!!(walletAddress && order.wallet === walletAddress)}
                       />
                     );
                   })

@@ -761,6 +761,53 @@ button[name="next-month"] {
 }
 
 /* ============================================================
+   Own-Order "YOU" Badge — 8-bit pixel style
+   ============================================================ */
+
+.own-order-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 2px;
+  border: 1.5px solid rgb(251 191 36 / 0.5);
+  background: rgb(251 191 36 / 0.08);
+  color: rgb(217 119 6);
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  position: relative;
+  white-space: nowrap;
+  animation: own-badge-glow 3s ease-in-out infinite;
+}
+
+.dark .own-order-badge {
+  border-color: rgb(251 191 36 / 0.35);
+  background: rgb(251 191 36 / 0.06);
+  color: rgb(252 211 77);
+}
+
+@keyframes own-badge-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgb(251 191 36 / 0);
+  }
+  50% {
+    box-shadow: 0 0 4px 0 rgb(251 191 36 / 0.2);
+  }
+}
+
+.own-order-row {
+  background: rgb(251 191 36 / 0.03) !important;
+}
+
+.dark .own-order-row {
+  background: rgb(251 191 36 / 0.02) !important;
+}
+
+/* ============================================================
    Mini Spinner — iOS / SwiftUI Activity Indicator
    ============================================================ */
 

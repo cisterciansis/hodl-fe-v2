@@ -99,6 +99,7 @@ export function OrderBook({
       filledOrdersMap={filledOrdersMap}
       allOrdersForSearch={allOrdersForSearch}
       showMyOrdersOnly={showMyOrdersOnly}
+      walletAddress={walletAddress}
       connectionState={connectionState}
       renderSubComponent={renderSubComponent}
       renderSplitSubComponent={renderSplitSubComponent}
