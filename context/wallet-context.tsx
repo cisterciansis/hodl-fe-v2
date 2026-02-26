@@ -26,6 +26,8 @@ interface WalletContextType {
     closeWalletModal: () => void
     /** Get the injected signer from the connected wallet extension (for signing transactions). */
     getSigner: () => InjectedExtension['signer'] | null
+    /** Re-acquire the injected extension and signer after context invalidation. */
+    refreshSigner: () => Promise<boolean>
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
@@ -466,30 +468,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     /**
      * Re-acquire the injected extension and its signer.
-     * Retries up to 3 times with exponential backoff (ported from TrustedStake).
+     *
+     * If the cached extension ref still has a valid signer, returns immediately.
+     * Otherwise does a single fast enable() call with a short timeout.
      */
     const refreshSigner = useCallback(async (): Promise<boolean> => {
         if (!walletType) return false
+
+        // Fast path: cached extension still valid
+        if (enabledExtensionRef.current?.signer) return true
+
         const extensionInfo = WALLET_EXTENSIONS[walletType]
-        const maxRetries = 3
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-                const extensionName = findWalletExtension(extensionInfo.possibleKeys)
-                if (!extensionName || !window.injectedWeb3?.[extensionName]) return false
-                const injected = window.injectedWeb3[extensionName]
-                const extension = await Promise.race([
-                    injected.enable('Infinity Exchange'),
-                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
-                ])
-                if (extension) {
-                    enabledExtensionRef.current = extension as InjectedExtension
-                    return true
-                }
-            } catch {
-                if (attempt < maxRetries - 1) {
-                    await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)))
-                }
+        try {
+            const extensionName = findWalletExtension(extensionInfo.possibleKeys)
+            if (!extensionName || !window.injectedWeb3?.[extensionName]) return false
+            const injected = window.injectedWeb3[extensionName]
+            const extension = await Promise.race([
+                injected.enable('Infinity Exchange'),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+            ])
+            if (extension) {
+                enabledExtensionRef.current = extension as InjectedExtension
+                return true
             }
+        } catch {
+            // Extension not reachable — caller can show reconnect UI
         }
         return false
     }, [walletType])
@@ -547,6 +550,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
                 openWalletModal,
                 closeWalletModal,
                 getSigner,
+                refreshSigner,
             }}
         >
             {children}

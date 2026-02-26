@@ -369,7 +369,7 @@ export function NewOrderModal({
     }
   }, [escrowGenerated]);
 
-  const { connectionState: wsConnectionState } = useWebSocket({
+  const { connectionState: wsState } = useWebSocket({
     url: WS_URL,
     onMessage: handleWebSocketMessage,
     onUuidReceived: handleUuidReceived,
@@ -875,13 +875,6 @@ export function NewOrderModal({
           <ConnectButton />
         </DialogHeader>
 
-        {!wsUuid && wsConnectionState !== "connected" && (
-          <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-            <span>Connecting to server...</span>
-          </div>
-        )}
-
         {error && (
           <div
             className={`p-3 rounded-md bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 text-sm transition-all duration-300 ease-in-out ${errorVisible
@@ -1204,13 +1197,15 @@ export function NewOrderModal({
               Market Price {priceForConversion > 0 ? priceForConversion.toFixed(6) : "0.000000"}
             </p>
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 1 && formData.stp > priceForConversion && (
-              <p className="text-sm text-amber-600 dark:text-amber-400">
-                Floor price is above current market price &mdash; your order will not execute until market rises above this level.
+              <p className="text-sm text-muted-foreground flex items-start gap-1.5">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-60" />
+                <span>Your floor price is above the current market price. This order will act as a limit order and fill once the market reaches your target.</span>
               </p>
             )}
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 2 && formData.stp < priceForConversion && (
-              <p className="text-sm text-amber-600 dark:text-amber-400">
-                Ceiling price is below current market price &mdash; your order will not execute until market drops below this level.
+              <p className="text-sm text-muted-foreground flex items-start gap-1.5">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-60" />
+                <span>Your ceiling price is below the current market price. This order will act as a limit order and fill once the market reaches your target.</span>
               </p>
             )}
           </div>
@@ -1360,11 +1355,11 @@ export function NewOrderModal({
               </Button>
               <Button
                 onClick={handleNext}
-                disabled={loading}
+                disabled={loading || !wsUuid}
                 className="bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold shadow-[0_4px_14px_0_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_0_rgba(37,99,235,0.4)]"
               >
-                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create Escrow
+                {(loading || (!wsUuid && open)) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {loading ? "Create Escrow" : !wsUuid ? (wsState === "error" ? "Connection Failed" : "Connecting...") : "Create Escrow"}
               </Button>
             </>
           ) : (

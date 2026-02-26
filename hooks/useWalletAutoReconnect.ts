@@ -1,20 +1,39 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useWallet } from "@/context/wallet-context";
 
 /**
  * Detects when a wallet account exists but the signer has been lost
  * (e.g. after tab sleep or extension context invalidation) and
- * automatically attempts one re-enablement.
+ * automatically refreshes it.
  *
- * Ported from TrustedStake staking UI reliability patterns.
+ * Returns `isRefreshingSigner` so the UI can show a brief
+ * "Refreshing wallet.." indicator instead of a generic connecting banner.
  */
 export function useWalletAutoReconnect() {
-  const { selectedAccount, getSigner, isConnected } = useWallet();
+  const { selectedAccount, getSigner, isConnected, refreshSigner } = useWallet();
+  const [isRefreshingSigner, setIsRefreshingSigner] = useState(false);
   const refreshAttemptedRef = useRef(false);
+  const lastAddressRef = useRef<string | null>(null);
+
+  const doRefresh = useCallback(async () => {
+    setIsRefreshingSigner(true);
+    try {
+      await refreshSigner();
+    } finally {
+      setIsRefreshingSigner(false);
+    }
+  }, [refreshSigner]);
 
   useEffect(() => {
+    const address = selectedAccount?.address ?? null;
+
+    if (address !== lastAddressRef.current) {
+      lastAddressRef.current = address;
+      refreshAttemptedRef.current = false;
+    }
+
     if (!isConnected || !selectedAccount) {
       refreshAttemptedRef.current = false;
       return;
@@ -29,9 +48,8 @@ export function useWalletAutoReconnect() {
     if (refreshAttemptedRef.current) return;
     refreshAttemptedRef.current = true;
 
-    // Reason: Signer is missing despite being connected — likely context
-    // invalidation. Re-dispatching a focus event nudges the visibility
-    // handler in wallet-context to re-enable the extension.
-    document.dispatchEvent(new Event("visibilitychange"));
-  }, [isConnected, selectedAccount, getSigner]);
+    doRefresh();
+  }, [isConnected, selectedAccount, getSigner, doRefresh]);
+
+  return { isRefreshingSigner };
 }

@@ -13,17 +13,27 @@ HODL Exchange is a decentralized order book for Bittensor Subnet 118, built with
 - **Blockchain:** Polkadot.js / Bittensor wallet extensions
 
 ### Data Flow
-- **Order Book:** Initial load + live updates via `/ws/new` (first message is full open-order batch)
+- **Order Book:** Live updates via `/ws/new` (public open orders + children)
+- **My Orders:** Live updates via `/ws/new?ss58=wallet` (all wallet orders: public, private, open, filled, closed)
 - **Prices:** Initial load via REST `/price`, live updates via `/ws/tap`
-- **TAO/Alpha/Price triplets:** Live updates via `/ws/tap` (per-escrow and subnet-wide)
+- **TAO/Alpha/Price triplets:** Live updates via `/ws/tap` (per-escrow and subnet-wide); `/ws/tap?ss58=wallet` for wallet-specific escrows
 - **TAO/USD price:** Pyth Hermes SSE (EventSource)
 - **Block height:** Polling `/api/tmc/blocks` (server-side cached)
 
 ### WebSocket Endpoints
 | Endpoint | Purpose |
 |----------|---------|
-| `/ws/new` | Order book streaming (new orders, status changes) |
-| `/ws/tap` | TAO/Alpha/Price triplet updates + subnet price broadcasts |
+| `/ws/new` | Public order book streaming (all public orders incl. children) |
+| `/ws/new?ss58=wallet` | My Orders streaming (all wallet orders: public, private, all statuses) |
+| `/ws/tap` | TAO/Alpha/Price triplet updates + subnet price broadcasts (public) |
+| `/ws/tap?ss58=wallet` | TAO/Alpha/Price triplet updates for wallet-specific escrows |
+
+### Dual WebSocket Architecture
+The frontend maintains **two independent WS streams** for Order Book and My Orders to prevent leaking private orders into the public book. Both streams connect concurrently (when wallet is connected) for instant view switching:
+- **Public stream** (`/ws/new` + `/ws/tap`): Always connected. Feeds the Order Book view.
+- **Private stream** (`/ws/new?ss58=wallet` + `/ws/tap?ss58=wallet`): Connected only when a wallet is connected. Feeds the My Orders view.
+- State is fully separate: `orders` (public) vs `myOrders` (private). Notifications come only from the private stream.
+- When the wallet changes or disconnects, `myOrders` is cleared and the private WS reconnects to the new address.
 
 ### WebSocket Message Formats
 `/ws/new` sends pandas `df.to_dict()` (column-oriented), double-JSON-encoded via `send_json(json.dumps(...))`.
@@ -42,10 +52,11 @@ Payloads are built via `buildRecPayload()` in `lib/api-utils.ts` which ensures:
 - N/A defaults: text → `''`, numbers → `0`, booleans → `false`
 
 ### UUID Contract
-- `/ws/new` UUID is captured on first message and used for session binding
+- `/ws/new` UUID is captured on first message and used for session binding (backend checks UUID for same-session verification)
 - Each modal gets its own WS connection and UUID
 - UUID is preserved via ref across reconnections; if WS reconnects mid-escrow-flow, the user is warned and escrow state is reset
 - `/ws/tap` UUID is ignored
+- The escrow created during wallet-connect flow is reused; no need to reset/kick user
 
 ### Key Components
 - `app/page.tsx` — Main page, WS connections, order state management

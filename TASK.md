@@ -110,6 +110,37 @@
 #### Completed
 - [x] **Filled orders vertical misalignment** — Expanded row details' filled orders table had no column width definitions, causing columns to misalign with the parent order book table. Fixed by applying `table-fixed` with a `<colgroup>` matching the parent column sizes (160, 110, 60, 50, 70, 70, 90, 90), negative margins to cancel parent padding, and matching cell padding/alignment.
 
+### 2026-02-25 — Wallet Refresh & Modal UX Optimization
+
+#### Completed
+- [x] **Pre-warm Bittensor API** — `preWarmApi()` called on mount in `page.tsx`; `getApi()` disconnect handler auto-reconnects after 2s so the chain API is always warm (eliminates 5-30s cold start on transfers)
+- [x] **Streamline wallet auto-reconnect** — `useWalletAutoReconnect` now calls `refreshSigner()` directly instead of dispatching a fake `visibilitychange` event; exposes `isRefreshingSigner` state for UI
+- [x] **Speed up `refreshSigner`** — Single attempt with 3s timeout (was 3 retries x 10s timeout + exponential backoff, up to ~37s worst case); fast-path returns immediately if cached extension still has valid signer
+- [x] **Remove blocking "Connecting to server..." banners** — Removed the amber/blue blocking banners from both `fill-order-modal` and `new-order-modal`. The per-modal WebSocket connects silently in the background while the user fills the form. The "Create Escrow" button is disabled until the WS UUID is available (subtle guard instead of blocking banner).
+- [x] **Faster WS reconnection** — Changed `useWebSocket` backoff from `2^n` capped at 30s (2s/4s/8s/16s/30s) to `1.5^n` capped at 3s (~1.5s/2.3s/3s/3s/3s) for much faster reconnection on modal connections.
+
+### 2026-02-25 — WebSocket Connection UX & CORS Proxy
+
+#### Completed
+- [x] **StrictMode WebSocket churn fix** — Added 80ms deferred connection in `useWebSocket` so React StrictMode's mount/unmount/remount cycle cancels the first connection attempt before the socket is created, eliminating the "WebSocket is closed before the connection is established" console spam in development.
+- [x] **"Connecting..." button indicator** — Both `fill-order-modal` and `new-order-modal` now show a spinner + "Connecting..." on the Create Escrow button while waiting for the WebSocket UUID. Shows "Connection Failed" when the WS enters error state. Previously the button was silently disabled with no feedback.
+- [x] **Expose connectionState to modals** — `useWebSocket` return value (`connectionState`) is now captured in both modals to drive button label/state.
+- [x] **Next.js rewrite proxy for all HTTP API calls** — Added `rewrites()` in `next.config.js` routing `/api/backend/:path*` → `https://api.subnet118.com/:path*`. All HTTP requests (`/rec`, `/price`, `/dbjson`, `/ofm`, `/sql`, `/stake/*`) now go through the same-origin proxy, eliminating CORS blocks when running localhost against the production API. WebSocket connections remain direct (not subject to CORS). `API_URL` changed from direct URL to `/api/backend`. Removed obsolete `app/api/orders/route.ts` single-endpoint proxy.
+
+### 2026-02-25 — Dual WebSocket Stream Separation
+
+#### Completed
+- [x] **Separate Order Book and My Orders WS streams** — Previously a single `/ws/new` connection served both views, and My Orders just filtered the public data (private orders never showed). Now two independent streams run concurrently:
+  - `/ws/new` (always on) → public Order Book: open + public orders
+  - `/ws/new?ss58=wallet` (when wallet connected) → My Orders: all wallet orders (public, private, open, filled, closed)
+- [x] **Separate TAP streams** — Matching dual TAP connections:
+  - `/ws/tap` → per-escrow updates for public orders + subnet price broadcasts
+  - `/ws/tap?ss58=wallet` → per-escrow updates for wallet-specific orders
+- [x] **Independent state management** — `orders` (public) and `myOrders` (private) are fully independent datasets. View switching is instant since both are pre-loaded in background.
+- [x] **Notification source migration** — Notifications (filled/cancelled) now sourced exclusively from the private My Orders stream to prevent duplicates.
+- [x] **Wallet change cleanup** — `myOrders` state and loaded flag reset when wallet address changes or disconnects. Private WS auto-reconnects to new address.
+- [x] **Optimistic updates** — `handleUpdateOrder` and `handleCancelOrder` now update both `orders` and `myOrders` states for instant UI feedback across views.
+
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`
 

@@ -4,10 +4,11 @@ const isDevMode =
 const LOCAL_API_URL = "http://127.0.0.1:8000";
 const LOCAL_WS_URL = "ws://127.0.0.1:8000/ws";
 
-const PROD_API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.subnet118.com";
 const PROD_WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://api.subnet118.com/ws";
 
-export const API_URL = isDevMode ? LOCAL_API_URL : PROD_API_URL;
+// Reason: HTTP requests go through Next.js rewrite proxy (/api/backend/*) to avoid
+// CORS blocks. WebSocket connections bypass CORS and connect directly.
+export const API_URL = isDevMode ? LOCAL_API_URL : "/api/backend";
 export const WS_BASE_URL = isDevMode ? LOCAL_WS_URL : PROD_WS_URL;
 
 export const getWebSocketNewUrl = (params?: { ss58?: string }): string => {

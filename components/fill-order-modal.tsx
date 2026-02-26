@@ -145,7 +145,7 @@ export function FillOrderModal({
     }
   }, [escrowGenerated]);
 
-  useWebSocket({
+  const { connectionState: wsState } = useWebSocket({
     url: WS_URL,
     onMessage: handleWebSocketMessage,
     onUuidReceived: handleUuidReceived,
@@ -619,13 +619,6 @@ export function FillOrderModal({
           <ConnectButton />
         </DialogHeader>
 
-        {!wsUuid && order.status !== 3 && (
-          <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-            <span>Connecting to server...</span>
-          </div>
-        )}
-
         {order.status === 3 && (
           <div className="p-3 rounded-md bg-slate-50 dark:bg-muted/50 border border-slate-200 dark:border-border text-slate-700 dark:text-foreground text-sm">
             Order closed. Wallet refunded.
@@ -907,11 +900,11 @@ export function FillOrderModal({
               </Button>
               <Button
                 onClick={handleFillOrder}
-                disabled={loading}
+                disabled={loading || !wsUuid}
                 className="bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold shadow-[0_4px_14px_0_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_0_rgba(37,99,235,0.4)]"
               >
-                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create Escrow
+                {(loading || (!wsUuid && open)) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {loading ? "Create Escrow" : !wsUuid ? (wsState === "error" ? "Connection Failed" : "Connecting...") : "Create Escrow"}
               </Button>
             </>
           ) : (

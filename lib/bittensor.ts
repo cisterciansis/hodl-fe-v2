@@ -29,10 +29,13 @@ export async function getApi(): Promise<ApiPromise> {
       const api = await ApiPromise.create({ provider });
       apiInstance = api;
 
-      // Handle disconnection so we reconnect on next call
+      // Self-healing: reconnect automatically after disconnection
       api.on('disconnected', () => {
-        console.warn('[Bittensor] API disconnected');
+        console.warn('[Bittensor] API disconnected, scheduling reconnect');
         apiInstance = null;
+        setTimeout(() => {
+          getApi().catch(() => {});
+        }, 2000);
       });
 
       console.log('[Bittensor] API connected to', BITTENSOR_RPC_URL);
@@ -43,6 +46,17 @@ export async function getApi(): Promise<ApiPromise> {
   })();
 
   return apiPromiseInFlight;
+}
+
+/**
+ * Pre-warm the Bittensor API connection at app startup.
+ * Installs a self-healing disconnect handler so the connection is
+ * re-established automatically after idle/network drops.
+ */
+export function preWarmApi(): void {
+  getApi().catch((err) => {
+    console.warn('[Bittensor] Pre-warm failed, will retry on next getApi():', err);
+  });
 }
 
 /**
@@ -219,9 +233,7 @@ export interface StakeEntry {
  * Returns an array of { hotkey, netuid, stake } entries.
  */
 export async function fetchStakeInfo(coldkeySs58: string): Promise<StakeEntry[]> {
-  const baseUrl = (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_API_URL)
-    ? process.env.NEXT_PUBLIC_API_URL
-    : 'https://api.subnet118.com';
+  const baseUrl = typeof window !== 'undefined' ? '/api/backend' : (process.env.NEXT_PUBLIC_API_URL || 'https://api.subnet118.com');
   const url = `${baseUrl}/stake/${coldkeySs58}`;
 
   const response = await fetch(url);

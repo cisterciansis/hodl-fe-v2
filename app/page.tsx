@@ -34,6 +34,7 @@ import { useBlockHeight } from "../hooks/useBlockHeight";
 import { MiniSpinner } from "../components/ui/mini-spinner";
 import { RiBox3Line } from "react-icons/ri";
 import { useWalletAutoReconnect } from "../hooks/useWalletAutoReconnect";
+import { preWarmApi } from "../lib/bittensor";
 
 export default function Home() {
   return (
@@ -64,6 +65,8 @@ function HomeContent() {
   const [recPopupMessage, setRecPopupMessage] = useState<string>("");
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [showLoading, setShowLoading] = useState(true);
+  const [myOrders, setMyOrders] = useState<Order[]>([]);
+  const [myOrdersLoaded, setMyOrdersLoaded] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
   const [subnetNames, setSubnetNames] = useState<Record<number, string>>({});
   const isLivePausedRef = useRef(false);
@@ -72,6 +75,7 @@ function HomeContent() {
 
   useEffect(() => {
     setMounted(true);
+    preWarmApi();
   }, []);
 
   // Reason: Expose page header height as CSS variable so the order-book
@@ -309,6 +313,44 @@ function HomeContent() {
   }, [normalizeOrder]);
 
   /**
+   * Merge a batch into myOrders state. Unlike mergeOrderBatch, keeps terminal
+   * statuses (filled/closed) since the My Orders view shows all statuses.
+   */
+  const mergeMyOrderBatch = useCallback((incoming: unknown[]) => {
+    if (incoming.length === 0) return;
+    setMyOrders((prev) => {
+      const map = new Map(prev.map((o) => [o.uuid, o]));
+      for (const raw of incoming) {
+        if (!raw || typeof raw !== "object") continue;
+        const normalized = normalizeOrder(raw);
+        if (!normalized.uuid) continue;
+        map.set(normalized.uuid, normalized);
+      }
+      return Array.from(map.values());
+    });
+  }, [normalizeOrder]);
+
+  const updateMyOrder = useCallback((updatedOrder: Order) => {
+    setMyOrders((prev) => {
+      const idx = prev.findIndex((o) => o.uuid === updatedOrder.uuid);
+      if (idx !== -1) {
+        const existing = prev[idx];
+        const merged = {
+          ...existing,
+          ...updatedOrder,
+          tao: updatedOrder.tao > 0 ? updatedOrder.tao : existing.tao,
+          alpha: updatedOrder.alpha > 0 ? updatedOrder.alpha : existing.alpha,
+          price: updatedOrder.price > 0 ? updatedOrder.price : existing.price,
+        };
+        const next = [...prev];
+        next[idx] = merged;
+        return next;
+      }
+      return [updatedOrder, ...prev];
+    });
+  }, []);
+
+  /**
    * Converts a pandas column-oriented dict to a row-oriented array.
    * Input:  {"date": {"0": "...", "1": "..."}, "uuid": {"0": "a", "1": "b"}, ...}
    * Output: [{"date": "...", "uuid": "a", ...}, {"date": "...", "uuid": "b", ...}]
@@ -389,49 +431,112 @@ function HomeContent() {
       // 4. Flat order object (scalar uuid + date)
       if ("uuid" in msg && "date" in msg) {
         const normalized = normalizeOrder(msg);
-        if (normalized.uuid) {
-          updateOrders(normalized);
-
-          const walletAddr = selectedAccount?.address;
-          if (walletAddr && normalized.wallet === walletAddr) {
-            if (normalized.status === 2) {
-              addNotification({
-                type: "filled",
-                message: `Order ${normalized.uuid.slice(0, 8)}... has been filled`,
-                orderUuid: normalized.uuid,
-              });
-            } else if (normalized.status === 3) {
-              addNotification({
-                type: "cancelled",
-                message: `Order ${normalized.uuid.slice(0, 8)}... has been closed`,
-                orderUuid: normalized.uuid,
-              });
-            }
-          }
-        }
+        if (normalized.uuid) updateOrders(normalized);
         if (!initialDataLoaded) setInitialDataLoaded(true);
         return;
       }
 
     },
-    [mergeOrderBatch, columnsToRows, normalizeOrder, updateOrders, selectedAccount?.address, addNotification, initialDataLoaded]
+    [mergeOrderBatch, columnsToRows, normalizeOrder, updateOrders, initialDataLoaded]
   );
 
-  // Reason: /ws/new (no ss58) streams ALL public orders — needed for the
-  // order book.  /ws/new?ss58=wallet only returns that wallet's orders,
-  // which is useful for "My Orders" but would leave the book empty.
-  const { connectionState } = useWebSocket({
+  const { connectionState: publicConnectionState } = useWebSocket({
     url: getWebSocketNewUrl(),
     onMessage: handleWebSocketMessage,
   });
 
-  // Reason: If the WS connects but the initial batch never arrives (e.g. no
-  // open orders exist), unlock the loading screen after a short grace period.
   useEffect(() => {
-    if (initialDataLoaded || connectionState !== "connected") return;
+    if (initialDataLoaded || publicConnectionState !== "connected") return;
     const timer = setTimeout(() => setInitialDataLoaded(true), 3000);
     return () => clearTimeout(timer);
-  }, [connectionState, initialDataLoaded]);
+  }, [publicConnectionState, initialDataLoaded]);
+
+  // --- My Orders WS: /ws/new?ss58=wallet ---
+  const walletAddress = selectedAccount?.address;
+
+  const handleMyOrdersWsMessage = useCallback(
+    (message: WebSocketMessage | unknown) => {
+      if (!message || typeof message !== "object") return;
+
+      if (Array.isArray(message)) {
+        mergeMyOrderBatch(message);
+        if (!myOrdersLoaded) setMyOrdersLoaded(true);
+        return;
+      }
+
+      const msg = message as Record<string, unknown>;
+      const keys = Object.keys(msg);
+
+      if (keys.length === 0) {
+        if (!myOrdersLoaded) setMyOrdersLoaded(true);
+        return;
+      }
+
+      const sampleKey = "uuid" in msg ? "uuid" : "date" in msg ? "date" : "";
+      if (sampleKey) {
+        const sample = msg[sampleKey];
+        if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
+          const rows = columnsToRows(msg);
+          mergeMyOrderBatch(rows);
+          if (!myOrdersLoaded) setMyOrdersLoaded(true);
+          return;
+        }
+      }
+
+      if ("data" in msg && msg.data !== undefined) {
+        const payload = msg.data;
+        if (Array.isArray(payload)) {
+          mergeMyOrderBatch(payload);
+        } else if (payload && typeof payload === "object") {
+          const normalized = normalizeOrder(payload);
+          if (normalized.uuid) updateMyOrder(normalized);
+        }
+        if (!myOrdersLoaded) setMyOrdersLoaded(true);
+        return;
+      }
+
+      if ("uuid" in msg && "date" in msg) {
+        const normalized = normalizeOrder(msg);
+        if (normalized.uuid) {
+          updateMyOrder(normalized);
+          if (normalized.status === 2) {
+            addNotification({
+              type: "filled",
+              message: `Order ${normalized.uuid.slice(0, 8)}... has been filled`,
+              orderUuid: normalized.uuid,
+            });
+          } else if (normalized.status === 3) {
+            addNotification({
+              type: "cancelled",
+              message: `Order ${normalized.uuid.slice(0, 8)}... has been closed`,
+              orderUuid: normalized.uuid,
+            });
+          }
+        }
+        if (!myOrdersLoaded) setMyOrdersLoaded(true);
+        return;
+      }
+    },
+    [mergeMyOrderBatch, columnsToRows, normalizeOrder, updateMyOrder, addNotification, myOrdersLoaded]
+  );
+
+  const { connectionState: myOrdersConnectionState } = useWebSocket({
+    url: getWebSocketNewUrl({ ss58: walletAddress }),
+    enabled: !!walletAddress,
+    onMessage: handleMyOrdersWsMessage,
+  });
+
+  // Reset My Orders state when wallet changes or disconnects
+  useEffect(() => {
+    setMyOrders([]);
+    setMyOrdersLoaded(false);
+  }, [walletAddress]);
+
+  useEffect(() => {
+    if (myOrdersLoaded || myOrdersConnectionState !== "connected") return;
+    const timer = setTimeout(() => setMyOrdersLoaded(true), 3000);
+    return () => clearTimeout(timer);
+  }, [myOrdersConnectionState, myOrdersLoaded]);
 
   // /ws/tap - handles TAO/Alpha/Price triplet updates
   // Carries both per-escrow updates AND subnet price broadcasts
@@ -519,16 +624,84 @@ function HomeContent() {
     }
   }, [flushPrices, flushTaps]);
 
+  // --- My Orders TAP: /ws/tap?ss58=wallet ---
+  const pendingMyTapsRef = useRef<Map<string, { tao: number; alpha: number; price: number }>>(new Map());
+  const myTapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushMyTaps = useCallback(() => {
+    const pending = new Map(pendingMyTapsRef.current);
+    pendingMyTapsRef.current.clear();
+    if (pending.size === 0) return;
+    setMyOrders((prev) =>
+      prev.map((order) => {
+        if (order.status === 1 && order.escrow && pending.has(order.escrow)) {
+          const update = pending.get(order.escrow)!;
+          return { ...order, ...update };
+        }
+        return order;
+      })
+    );
+  }, []);
+
+  const handleMyOrdersTapMessage = useCallback((message: unknown) => {
+    try {
+      const tapData = parseWsMessage<Record<string, unknown>>(message);
+      if (!tapData || typeof tapData !== "object") return;
+
+      // Subnet prices + names: update shared state from either TAP stream
+      const priceObj = tapData.price;
+      if (priceObj && typeof priceObj === "object" && !Array.isArray(priceObj)) {
+        for (const [key, value] of Object.entries(priceObj as Record<string, unknown>)) {
+          const netuid = Number(key);
+          const price = Number(value);
+          if (!isNaN(netuid) && !isNaN(price) && price > 0) {
+            pendingPricesRef.current[netuid] = price;
+          }
+        }
+        if (!priceFlushTimerRef.current) {
+          priceFlushTimerRef.current = setTimeout(() => {
+            priceFlushTimerRef.current = null;
+            flushPrices();
+          }, 200);
+        }
+      }
+
+      if ("escrow" in tapData && tapData.escrow) {
+        const escrow = String(tapData.escrow);
+        pendingMyTapsRef.current.set(escrow, {
+          tao: Number(tapData.tao || 0),
+          alpha: Number(tapData.alpha || 0),
+          price: Number(tapData.price || 0),
+        });
+        if (!myTapFlushTimerRef.current) {
+          myTapFlushTimerRef.current = setTimeout(() => {
+            myTapFlushTimerRef.current = null;
+            flushMyTaps();
+          }, 200);
+        }
+      }
+    } catch (error) {
+      console.error("Error processing my orders tap message:", error);
+    }
+  }, [flushPrices, flushMyTaps]);
+
   useEffect(() => {
     return () => {
       if (priceFlushTimerRef.current) clearTimeout(priceFlushTimerRef.current);
       if (tapFlushTimerRef.current) clearTimeout(tapFlushTimerRef.current);
+      if (myTapFlushTimerRef.current) clearTimeout(myTapFlushTimerRef.current);
     };
   }, []);
 
   useWebSocket({
     url: getWebSocketTapUrl(),
     onMessage: handleTapMessage,
+  });
+
+  useWebSocket({
+    url: getWebSocketTapUrl({ ss58: walletAddress }),
+    enabled: !!walletAddress,
+    onMessage: handleMyOrdersTapMessage,
   });
 
   // Fetch initial prices via REST
@@ -597,7 +770,8 @@ function HomeContent() {
 
   const handleUpdateOrder = async (uuid: string, updates: Partial<Order>) => {
     try {
-      const order = orders.find((o) => o.uuid === uuid && o.status === 1);
+      const sourceOrders = showMyOrdersOnly ? myOrders : orders;
+      const order = sourceOrders.find((o) => o.uuid === uuid && o.status === 1);
       if (!order) return;
 
       const dbRecord = await fetchDbRecord(API_URL, order.escrow);
@@ -619,11 +793,12 @@ function HomeContent() {
         if (recResult?.message) setRecPopupMessage(recResult.message);
       } catch { /* ignore */ }
 
-      setOrders((prev) =>
+      const applyUpdate = (prev: Order[]) =>
         prev.map((o) =>
           o.uuid === uuid && o.status === 1 ? { ...o, ...updates } : o
-        )
-      );
+        );
+      setOrders(applyUpdate);
+      setMyOrders(applyUpdate);
     } catch (error) {
       console.error("Error updating order:", error);
     }
@@ -631,7 +806,8 @@ function HomeContent() {
 
   const handleCancelOrder = async (uuid: string) => {
     try {
-      const order = orders.find((o) => o.uuid === uuid && o.status === 1);
+      const sourceOrders = showMyOrdersOnly ? myOrders : orders;
+      const order = sourceOrders.find((o) => o.uuid === uuid && o.status === 1);
       if (!order) return;
 
       const dbRecord = await fetchDbRecord(API_URL, order.escrow);
@@ -656,44 +832,59 @@ function HomeContent() {
     }
   };
 
-  const { openOrders, filledOrdersMap } = useMemo(() => {
+  // Reason: Two separate memos for public vs. private data sources. The public
+  // Order Book only shows open+public orders; My Orders shows all wallet orders.
+  const { publicOpenOrders, publicFilledMap } = useMemo(() => {
     const open: Order[] = [];
-    const filled: Record<string, Order[]> = {}; // Parent UUID -> filled + closed orders array
+    const filled: Record<string, Order[]> = {};
 
     orders.forEach((order) => {
       if (order.status === 1 && order.public === true) {
         open.push(order);
       } else if (order.status === 2 || order.status === 3) {
         const parentUuid = order.origin || order.uuid;
-        if (!filled[parentUuid]) {
-          filled[parentUuid] = [];
-        }
+        if (!filled[parentUuid]) filled[parentUuid] = [];
         filled[parentUuid].push(order);
       }
     });
 
     Object.keys(filled).forEach((uuid) => {
-      filled[uuid].sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        return dateB - dateA;
-      });
+      filled[uuid].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     });
 
-    return { openOrders: open, filledOrdersMap: filled };
+    return { publicOpenOrders: open, publicFilledMap: filled };
   }, [orders]);
 
+  const { myOpenOrders, myFilledMap } = useMemo(() => {
+    const open: Order[] = [];
+    const filled: Record<string, Order[]> = {};
+
+    myOrders.forEach((order) => {
+      if (order.status === 1) {
+        open.push(order);
+      } else if (order.status === 2 || order.status === 3) {
+        const parentUuid = order.origin || order.uuid;
+        if (!filled[parentUuid]) filled[parentUuid] = [];
+        filled[parentUuid].push(order);
+      }
+    });
+
+    Object.keys(filled).forEach((uuid) => {
+      filled[uuid].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    });
+
+    return { myOpenOrders: open, myFilledMap: filled };
+  }, [myOrders]);
+
+  const filledOrdersMap = showMyOrdersOnly ? myFilledMap : publicFilledMap;
+
   const sortedOrders = useMemo(() => {
-    let filteredOrders = openOrders;
-    if (showMyOrdersOnly && selectedAccount?.address) {
-      const addr = selectedAccount.address;
-      filteredOrders = orders.filter(
-        (order) => order.wallet === addr || order.origin === addr
-      );
-    }
+    // My Orders: show all wallet orders (any status) from dedicated WS stream
+    // Order Book: show only public open orders from public WS stream
+    const source = showMyOrdersOnly ? myOrders : publicOpenOrders;
 
     const uniqueOrdersMap = new Map<string, Order>();
-    filteredOrders.forEach((order) => {
+    source.forEach((order) => {
       const existing = uniqueOrdersMap.get(order.uuid);
       if (!existing) {
         uniqueOrdersMap.set(order.uuid, order);
@@ -706,12 +897,10 @@ function HomeContent() {
       }
     });
 
-    return Array.from(uniqueOrdersMap.values()).sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-  }, [orders, openOrders, showMyOrdersOnly, selectedAccount?.address]);
+    return Array.from(uniqueOrdersMap.values()).sort((a, b) =>
+      new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }, [myOrders, publicOpenOrders, showMyOrdersOnly]);
 
   return (
     <>
@@ -855,7 +1044,7 @@ function HomeContent() {
           prices={prices}
           filledOrdersMap={filledOrdersMap}
           newlyAddedOrderIds={newlyAddedOrderIds}
-          allOrdersForSearch={orders}
+          allOrdersForSearch={showMyOrdersOnly ? myOrders : orders}
           onUpdateOrder={handleUpdateOrder}
           onCancelOrder={handleCancelOrder}
           onFillOrder={undefined}
@@ -864,7 +1053,7 @@ function HomeContent() {
           apiUrl={API_URL}
           showMyOrdersOnly={showMyOrdersOnly}
           walletAddress={selectedAccount?.address}
-          connectionState={connectionState}
+          connectionState={showMyOrdersOnly ? myOrdersConnectionState : publicConnectionState}
           onPauseChange={handleLivePauseChange}
           subnetNames={subnetNames}
           ofm={ofm}

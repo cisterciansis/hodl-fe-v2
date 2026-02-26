@@ -25,6 +25,9 @@ export function useWebSocket({
   const [uuid, setUuid] = useState<string>("");
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Reason: Deferred connection lets StrictMode cleanup cancel before the socket is created,
+  // avoiding the "WebSocket is closed before the connection is established" browser warning.
+  const connectDelayRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const onMessageRef = useRef(onMessage);
   const onErrorRef = useRef(onError);
@@ -40,23 +43,10 @@ export function useWebSocket({
     onReconnectRef.current = onReconnect;
   }, [onMessage, onError, onUuidReceived, onReconnect]);
 
-  const connect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (!enabled) return;
-
-    if (wsRef.current?.readyState === WebSocket.OPEN ||
-      wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
+  const openSocket = useCallback((targetUrl: string) => {
     try {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(targetUrl);
       wsRef.current = ws;
-      setConnectionState("connecting");
 
       ws.onopen = () => {
         setConnectionState("connected");
@@ -68,25 +58,23 @@ export function useWebSocket({
         hasConnectedOnceRef.current = true;
       };
 
-      ws.onclose = (event: CloseEvent) => {
+      ws.onclose = () => {
         wsRef.current = null;
         setConnectionState("disconnected");
 
-        if (enabled && reconnectAttemptsRef.current < 10) {
+        if (reconnectAttemptsRef.current < 10) {
           reconnectAttemptsRef.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          const delay = Math.min(1000 * Math.pow(1.5, reconnectAttemptsRef.current), 3000);
 
           reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
+            openSocket(targetUrl);
           }, delay);
-        } else if (reconnectAttemptsRef.current >= 10) {
+        } else {
           setConnectionState("error");
         }
       };
 
       ws.onerror = (event: Event) => {
-        setConnectionState("error");
-
         if (onErrorRef.current) {
           onErrorRef.current(event);
         }
@@ -139,18 +127,52 @@ export function useWebSocket({
           if (onMessageRef.current) {
             onMessageRef.current(message);
           }
-        } catch (error) {
+        } catch {
+          /* malformed message — ignore */
         }
       };
-    } catch (error) {
+    } catch {
       setConnectionState("error");
     }
-  }, [url, enabled]);
+  }, []);
+
+  const connect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (connectDelayRef.current) {
+      clearTimeout(connectDelayRef.current);
+      connectDelayRef.current = null;
+    }
+
+    if (!enabled) return;
+
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    setConnectionState("connecting");
+
+    connectDelayRef.current = setTimeout(() => {
+      connectDelayRef.current = null;
+      if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+      openSocket(url);
+    }, 80);
+  }, [url, enabled, openSocket]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (connectDelayRef.current) {
+      clearTimeout(connectDelayRef.current);
+      connectDelayRef.current = null;
     }
 
     if (wsRef.current) {
@@ -174,6 +196,10 @@ export function useWebSocket({
     }
 
     return () => {
+      if (connectDelayRef.current) {
+        clearTimeout(connectDelayRef.current);
+        connectDelayRef.current = null;
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
