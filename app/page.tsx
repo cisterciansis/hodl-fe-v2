@@ -982,50 +982,6 @@ function HomeContent() {
     );
   }, [myOrders, publicOpenOrders, showMyOrdersOnly]);
 
-  // Reason: The public WS stream may broadcast a child fill order (status=2 with
-  // origin=parentUuid) without ever sending a status update for the parent itself.
-  // Detect this inconsistency (parent status=1 but has filled children) and re-fetch
-  // the parent's actual status from the backend so the UI reflects "Filled".
-  const checkedStaleParentsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const staleUuids: string[] = [];
-    const allOpen = [...publicOpenOrders, ...myOpenOrders];
-    const seen = new Set<string>();
-
-    for (const parent of allOpen) {
-      if (seen.has(parent.uuid) || checkedStaleParentsRef.current.has(parent.uuid)) continue;
-      seen.add(parent.uuid);
-      if (publicFilledMap[parent.uuid]?.length > 0) {
-        staleUuids.push(parent.uuid);
-      }
-    }
-
-    if (staleUuids.length === 0) return;
-
-    for (const uuid of staleUuids) {
-      checkedStaleParentsRef.current.add(uuid);
-      fetch(`${API_URL}/sql?uuid=${uuid}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!data) return;
-          const parsed = typeof data === "string" ? JSON.parse(data) : data;
-          const arr = Array.isArray(parsed) ? parsed : [parsed];
-          for (const raw of arr) {
-            if (raw?.uuid !== uuid) continue;
-            const norm = normalizeOrder(raw);
-            if (norm.status < 2) continue;
-            setOrders((prev) =>
-              prev.map((o) => (o.uuid === uuid ? { ...o, ...norm } : o))
-            );
-            setMyOrders((prev) =>
-              prev.map((o) => (o.uuid === uuid ? { ...o, ...norm } : o))
-            );
-          }
-        })
-        .catch(() => {});
-    }
-  }, [publicOpenOrders, myOpenOrders, publicFilledMap, normalizeOrder]);
-
   return (
     <>
       {showLoading && (

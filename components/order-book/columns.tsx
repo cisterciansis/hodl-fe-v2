@@ -9,9 +9,10 @@ import {
   formatWalletAddress,
   getOrderType,
   getOrderStatus,
+  getDisplayStatus,
 } from "@/lib/types";
 
-const getStatusColor = (status: number): string => {
+export const getStatusColor = (status: number): string => {
   switch (status) {
     case 0:
       return "text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-800";
@@ -26,7 +27,7 @@ const getStatusColor = (status: number): string => {
     case 5:
       return "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800";
     case 6:
-      return "text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800";
+      return "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800";
     default:
       return "text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-800";
   }
@@ -367,17 +368,16 @@ export const columns = (
       </div>
     ),
     cell: ({ row }) => {
-      const status = row.getValue("status") as number;
-      const statusText = getOrderStatus(status);
+      const { status: displayStatus, text: statusText } = getDisplayStatus(row.original, prices);
 
-        const badgeVariant = "outline";
-        const badgeClassName = status === 2 ? "font-medium" : `${getStatusColor(status)} font-medium`;
+      const badgeVariant = "outline";
+      const badgeClassName = displayStatus === 2 ? "font-medium" : `${getStatusColor(displayStatus)} font-medium`;
 
       return (
         <div className="flex justify-center pr-4">
           <Badge
-              variant={badgeVariant}
-              className={badgeClassName}
+            variant={badgeVariant}
+            className={badgeClassName}
           >
             {statusText}
           </Badge>

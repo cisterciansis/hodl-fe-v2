@@ -1274,13 +1274,13 @@ export function NewOrderModal({
               Market Price {priceForConversion > 0 ? priceForConversion.toFixed(6) : "0.000000"}
             </p>
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 1 && formData.stp > priceForConversion && (
-              <p className="text-sm text-red-600 dark:text-red-400 flex items-start gap-1.5">
+              <p className="text-sm text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <span>Floor price must be at or below the current market price ({priceForConversion.toFixed(6)}). Lower your floor price to proceed.</span>
               </p>
             )}
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 2 && formData.stp < priceForConversion && (
-              <p className="text-sm text-red-600 dark:text-red-400 flex items-start gap-1.5">
+              <p className="text-sm text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <span>Ceiling price must be at or above the current market price ({priceForConversion.toFixed(6)}). Raise your ceiling price to proceed.</span>
               </p>

@@ -45,9 +45,9 @@ import {
   WifiOff,
 } from "lucide-react";
 import { SplitBookView } from "./split-view";
-import { formatTao, formatNumber, formatPrice } from "./columns";
+import { formatTao, formatNumber, formatPrice, getStatusColor } from "./columns";
 import { Badge } from "@/components/ui/badge";
-import { getOrderType, getOrderStatus, formatWalletAddress } from "@/lib/types";
+import { getOrderType, getOrderStatus, getDisplayStatus, formatWalletAddress } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -767,7 +767,7 @@ export function DataTable<TData, TValue>({
                 rows.map((row) => {
                   const order = row.original as any;
                   const orderType = getOrderType(order.type);
-                  const statusText = getOrderStatus(order.status);
+                  const { status: displayStatus, text: statusText } = getDisplayStatus(order, prices);
                   const isExpanded = row.getIsExpanded();
                   const taoValue = order.tao > 0 ? order.tao : order.bid;
                   const alphaValue = order.alpha > 0 ? order.alpha : order.ask;
@@ -812,7 +812,7 @@ export function DataTable<TData, TValue>({
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-medium text-xs">
+                            <Badge variant="outline" className={`font-medium text-xs ${getStatusColor(displayStatus)}`}>
                               {statusText}
                             </Badge>
                           </div>

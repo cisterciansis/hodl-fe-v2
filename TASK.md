@@ -170,12 +170,18 @@
 - [x] **Permalink landing UX** — When opening a `?order=UUID` link, the order is auto-expanded, scrolled into view, and highlighted with a blue ring animation that fades after ~3.5s. Works for both public orders (already in the book) and private orders (fetched via `/sql`).
 - [x] **All view modes supported** — Permalink highlight/scroll works across desktop table, mobile card, and split view modes.
 
-### 2026-02-25 — Stale Order Status Bug Fix
+### 2026-02-25 — Order Status Propagation Fix
+
+#### Status Lifecycle (from BE dev)
+- **Parent/Origin order:** status 1 = Open → status 3 = Closed (after fill completes)
+- **Child/Fill order:** status 2 = Filled, status 3 = Closed (fill failed/cancelled)
 
 #### Completed
-- [x] **Cross-stream status sync** — When the My Orders WS stream (`/ws/new?ss58=wallet`) receives filled (status=2) or closed (status=3) orders, the status is now propagated to the public `orders` state. Previously the public Order Book stream (`/ws/new`) only sent open orders and never notified when they were filled, leaving stale "open" entries indefinitely.
-- [x] **UUID collision fix in batch merges** — Both `mergeOrderBatch` (public) and `mergeMyOrderBatch` (private) now prefer the record with the higher positive status when the same UUID appears multiple times in a batch (e.g. a staging status=-1 row overwriting a status=2 fill). Prevents race conditions where iteration order could revert a filled order back to open.
-- [x] **Stale parent status detection** — Added `useEffect` that detects parent orders still showing status=1 ("Open") but with filled child orders (status=2) in `publicFilledMap`. When detected, re-fetches the parent's actual status from `/sql?uuid=X` and updates both `orders` and `myOrders` state. Handles the case where the backend broadcasts the child fill order but never sends a separate status update for the parent. Deduplicates via `checkedStaleParentsRef` to avoid repeated fetches.
+- [x] **Cross-stream status sync** — When the My Orders WS stream (`/ws/new?ss58=wallet`) receives status=2 or status=3 orders, the status is now propagated to the public `orders` state via `syncToPublicOrders()`. This ensures the Order Book view removes stale "open" entries when a fill closes the parent order.
+- [x] **UUID collision fix in batch merges** — Both `mergeOrderBatch` (public) and `mergeMyOrderBatch` (private) now prefer the record with the higher positive status when the same UUID appears multiple times in a batch (e.g. a staging status=-1 row overwriting a later status). Prevents race conditions where iteration order could revert status.
+
+#### Pending — BE Required
+- [ ] **Parent order status update on fill** — Backend currently creates child fill order (status=2) but does NOT update the parent order's status from 1→3. Once BE implements this, the existing FE cross-stream sync will propagate the status change automatically. No additional FE work needed.
 
 ### 2026-02-25 — Floor/Ceiling Price Validation
 
@@ -186,6 +192,20 @@
 
 #### Completed
 - [x] **Surface server error messages on close/modify** — `handleCancelOrder` and `handleUpdateOrder` now read the response body on non-OK (e.g. 400) responses and display the server's error message in the popup dialog instead of throwing a generic console error. Popup dialog title changed from hardcoded "Order closed" to generic "Order Update" so it works for both success and error messages.
+
+### 2026-02-25 — UI Polish
+
+#### Completed
+- [x] **Floor/Ceiling price warning color** — Changed the inline validation messages for invalid floor/ceiling prices from red (`text-red-600`) to amber (`text-amber-600`) for a less alarming appearance while still clearly communicating the constraint.
+
+### 2026-02-25 — Dynamic Stopped & Expired Order Badges
+
+#### Completed
+- [x] **Stopped badge** — Open orders now dynamically display a yellow "Stopped" badge when the live TAP market price breaches the stop price: sell orders when market <= floor (`stp`), buy orders when market >= ceiling (`stp`). Reverts to "Open" when the market moves back.
+- [x] **Expired badge** — Open orders with a GTD (Good Till Date) display a yellow "Expired" badge when the current UTC time >= GTD. Reverts to "Open" if the user modifies the order to extend the date.
+- [x] **`getDisplayStatus()` helper** — Added to `lib/types.ts`. Computes display status from live prices and current time for Open orders; all other statuses pass through unchanged. Priority: Expired > Stopped > Open.
+- [x] **Unified amber color for both badges** — Changed status 6 (Expired) from purple to amber in `getStatusColor` so both Stopped and Expired use yellow/amber styling.
+- [x] **All views updated** — Desktop table (`columns.tsx`) and mobile cards (`data-table.tsx`) both use `getDisplayStatus()`. Split view and row details confirmed no changes needed (split view only shows Open orders, row details only shows Filled/Closed child orders).
 
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`

@@ -57,3 +57,50 @@ export const getOrderStatus = (status: number): OrderStatus => {
     default: return "Init"
   }
 }
+
+/**
+ * Computes a display status for an order based on live market prices and current time.
+ * Only overrides Open orders (status=1); all other statuses pass through unchanged.
+ *
+ * Priority: Expired (GTD breach) > Stopped (floor/ceiling breach) > Open.
+ *
+ * Args:
+ *   order (Order): The order to evaluate.
+ *   prices (Record<number, number>): Live TAP market prices keyed by netuid.
+ *
+ * Returns:
+ *   { status: number; text: OrderStatus }: The computed display status.
+ */
+export function getDisplayStatus(
+  order: Order,
+  prices: Record<number, number>
+): { status: number; text: OrderStatus } {
+  if (order.status !== 1) {
+    return { status: order.status, text: getOrderStatus(order.status) };
+  }
+
+  // Expired: GTD is set and current UTC time >= GTD
+  if (order.gtd && order.gtd !== '') {
+    const gtdDate = new Date(order.gtd.endsWith('Z') ? order.gtd : order.gtd + 'Z');
+    if (!isNaN(gtdDate.getTime()) && new Date() >= gtdDate) {
+      return { status: 6, text: "Expired" };
+    }
+  }
+
+  // Stopped: stop price is set and market price triggers it
+  if (order.stp > 0) {
+    const marketPrice = prices[order.asset] ?? 0;
+    if (marketPrice > 0) {
+      // Sell order: stopped when market at or below floor
+      if (order.type === 1 && marketPrice <= order.stp) {
+        return { status: 5, text: "Stopped" };
+      }
+      // Buy order: stopped when market at or above ceiling
+      if (order.type === 2 && marketPrice >= order.stp) {
+        return { status: 5, text: "Stopped" };
+      }
+    }
+  }
+
+  return { status: 1, text: "Open" };
+}
