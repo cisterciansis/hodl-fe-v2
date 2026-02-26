@@ -242,7 +242,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                   </DialogHeader>
                   <div className="grid gap-4 py-4">
                     <div className="space-y-2">
-                      <Label htmlFor="stp">Stop Price (TAO)</Label>
+                      <Label htmlFor="stp">{order.type === 1 ? "Floor" : "Ceiling"} Price (TAO)</Label>
                       <div className="relative flex items-center">
                         <Input
                           id="stp"
@@ -262,7 +262,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                               setEditStp(Number((editStp + 0.001).toFixed(3)));
                             }}
                             className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            aria-label="Increase stop price"
+                            aria-label={`Increase ${order.type === 1 ? "floor" : "ceiling"} price`}
                           >
                             <ChevronUp className="h-3 w-3 text-muted-foreground" />
                           </button>
@@ -276,7 +276,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                               setEditStp(newValue);
                             }}
                             className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            aria-label="Decrease stop price"
+                            aria-label={`Decrease ${order.type === 1 ? "floor" : "ceiling"} price`}
                           >
                             <ChevronDown className="h-3 w-3 text-muted-foreground" />
                           </button>
@@ -508,7 +508,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 !mt-1">
               <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
                 <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
-                  Stop Price
+                  {order.type === 1 ? "Floor" : "Ceiling"} Price
                 </legend>
                 <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
                   {order.stp > 0 ? formatPrice(order.stp) : "None"}
@@ -552,7 +552,7 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 !mt-0">
               <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
                 <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
-                  Stop Price
+                  {order.type === 1 ? "Floor" : "Ceiling"} Price
                 </legend>
                 <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
                   {order.stp > 0 ? formatPrice(order.stp) : "None"}
