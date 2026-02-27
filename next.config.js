@@ -1,3 +1,4 @@
+const path = require('path')
 const webpack = require('webpack')
 
 const PROD_API_ORIGIN = process.env.NEXT_PUBLIC_API_URL || "https://api.subnet118.com";
@@ -5,6 +6,7 @@ const PROD_API_ORIGIN = process.env.NEXT_PUBLIC_API_URL || "https://api.subnet11
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: path.join(__dirname, './'),
   async rewrites() {
     return [
       {
