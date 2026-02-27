@@ -82,6 +82,11 @@ interface DataTableProps<TData, TValue> {
   subnetNames?: Record<number, string>;
   highlightedOrderId?: string | null;
   onHighlightComplete?: () => void;
+  filterAddress?: string | null;
+  onFilterAddressChange?: (address: string | null) => void;
+  filteredOrders?: TData[];
+  filteredFilledMap?: Record<string, TData[]>;
+  filteredConnectionState?: "connected" | "connecting" | "disconnected" | "error";
 }
 
 export function DataTable<TData, TValue>({
@@ -101,6 +106,11 @@ export function DataTable<TData, TValue>({
   subnetNames = {},
   highlightedOrderId,
   onHighlightComplete,
+  filterAddress,
+  onFilterAddressChange,
+  filteredOrders = [],
+  filteredFilledMap = {},
+  filteredConnectionState = "disconnected",
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [isLivePaused, setIsLivePaused] = React.useState(false);
@@ -125,6 +135,12 @@ export function DataTable<TData, TValue>({
   const [splitExpandedRowId, setSplitExpandedRowId] = React.useState<string | null>(null);
   const [activeHighlightId, setActiveHighlightId] = React.useState<string | null>(null);
   const highlightHandledRef = React.useRef<string | null>(null);
+
+  // Reason: Show the filter WS connection state when actively filtering by address,
+  // otherwise show the normal (public or myOrders) connection state.
+  const effectiveConnectionState = (isSearchActive && filterAddress)
+    ? filteredConnectionState
+    : connectionState;
 
   const { subnetNames: tmcSubnetNames } = useTMCSubnets();
   const filterSubnetOptions = React.useMemo(() => {
@@ -291,16 +307,28 @@ export function DataTable<TData, TValue>({
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Reason: When filterAddress is set, the backend streams ALL orders for that
+  // address via a dedicated WS. We use that as the primary source and only apply
+  // order-type / asset-id client-side filters. When no ss58 is in the filter,
+  // fall back to client-side filtering of the public/myOrders in-memory data.
   const filteredData = React.useMemo(() => {
     if (isSearchActive) {
-      const allFilledOrders = Object.values(filledOrdersMap).flat() as any[];
-      const searchOrders = [
-        ...(allOrdersForSearch.length > 0 ? allOrdersForSearch : data),
-        ...allFilledOrders,
-      ];
+      let sourceOrders: any[];
+
+      if (filterAddress) {
+        // Dedicated WS provides all orders for this address — use directly
+        sourceOrders = filteredOrders as any[];
+      } else {
+        // No ss58 filter — client-side filter from in-memory data
+        const allFilledOrders = Object.values(filledOrdersMap).flat() as any[];
+        sourceOrders = [
+          ...(allOrdersForSearch.length > 0 ? allOrdersForSearch : data),
+          ...allFilledOrders,
+        ];
+      }
 
       const uniqueOrdersMap = new Map<string, any>();
-      searchOrders.forEach((order: any) => {
+      sourceOrders.forEach((order: any) => {
         if (!order || !order.uuid) return;
         const key = `${order.uuid}-${order.status}-${order.escrow || ""}`;
         if (!uniqueOrdersMap.has(key)) {
@@ -310,8 +338,10 @@ export function DataTable<TData, TValue>({
       const uniqueOrders = Array.from(uniqueOrdersMap.values());
 
       return uniqueOrders.filter((order: any) => {
+        // Skip client-side address filtering when filterAddress is set
+        // because the WS already scoped results to that address
         let addressMatch = true;
-        if (searchAddress && searchAddress.trim() !== "") {
+        if (!filterAddress && searchAddress && searchAddress.trim() !== "") {
           const searchLower = searchAddress.toLowerCase().trim();
           const originMatch = order.origin
             ? String(order.origin).toLowerCase().includes(searchLower)
@@ -335,8 +365,7 @@ export function DataTable<TData, TValue>({
           assetIdMatch = searchAssetIds.has(Number(order.asset));
         }
 
-        const matches = addressMatch && orderTypeMatch && assetIdMatch;
-        return matches;
+        return addressMatch && orderTypeMatch && assetIdMatch;
       });
     }
 
@@ -361,6 +390,8 @@ export function DataTable<TData, TValue>({
     searchAssetIds,
     filledOrdersMap,
     allOrdersForSearch,
+    filterAddress,
+    filteredOrders,
   ]);
 
 
@@ -497,8 +528,8 @@ export function DataTable<TData, TValue>({
                 className={`group mt-2 inline-flex items-center gap-1 transition-all ${isLivePaused ? "cursor-pointer" : "cursor-default"
                   }`}
                 title={
-                  connectionState !== "connected"
-                    ? connectionState === "connecting"
+                  effectiveConnectionState !== "connected"
+                    ? effectiveConnectionState === "connecting"
                       ? "Connecting to server..."
                       : "Disconnected from server"
                     : isLivePaused
@@ -506,33 +537,33 @@ export function DataTable<TData, TValue>({
                       : "Streaming live"
                 }
               >
-                {connectionState === "connected" ? (
+                {effectiveConnectionState === "connected" ? (
                   <Wifi
                     className={`h-4 w-4 transition-colors ${isLivePaused
                         ? "text-amber-500 group-hover:text-amber-400"
                         : "text-emerald-500 status-icon-live"
                       }`}
                   />
-                ) : connectionState === "connecting" ? (
+                ) : effectiveConnectionState === "connecting" ? (
                   <Wifi className="h-4 w-4 text-amber-500 status-icon-connecting" />
                 ) : (
                   <WifiOff className="h-4 w-4 text-red-500/80" />
                 )}
                 <span
-                  className={`text-[11px] font-semibold uppercase tracking-wider transition-colors ${connectionState === "connected"
+                  className={`text-[11px] font-semibold uppercase tracking-wider transition-colors ${effectiveConnectionState === "connected"
                       ? isLivePaused
                         ? "text-amber-500 group-hover:text-amber-400"
                         : "text-emerald-500"
-                      : connectionState === "connecting"
+                      : effectiveConnectionState === "connecting"
                         ? "text-amber-500/80"
                         : "text-red-500/70"
                     }`}
                 >
-                  {connectionState === "connected"
+                  {effectiveConnectionState === "connected"
                     ? isLivePaused
                       ? "Paused"
                       : "Live"
-                    : connectionState === "connecting"
+                    : effectiveConnectionState === "connecting"
                       ? "..."
                       : "Offline"}
                 </span>
@@ -697,6 +728,7 @@ export function DataTable<TData, TValue>({
                           setSubnetSearchText("");
                           setSearchAssetIds(new Set());
                           setSearchPopoverOpen(false);
+                          onFilterAddressChange?.(null);
                         }}
                       >
                         Cancel
@@ -705,6 +737,8 @@ export function DataTable<TData, TValue>({
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          const trimmed = searchAddress.trim();
+                          onFilterAddressChange?.(trimmed || null);
                           setIsSearchActive(true);
                           setSearchPopoverOpen(false);
                         }}
@@ -723,6 +757,7 @@ export function DataTable<TData, TValue>({
                     setSearchOrderType(undefined);
                     setSubnetSearchText("");
                     setSearchAssetIds(new Set());
+                    onFilterAddressChange?.(null);
                   }}
                   variant="outline"
                   size="sm"

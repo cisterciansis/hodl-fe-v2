@@ -33,6 +33,9 @@ export interface NewOrderFormData {
   stp?: number // stop price
   partial: boolean // allow partial fills
   public: boolean // public order visibility
+  accept?: string // counter party wallet address (ss58) — private orders only
+  askBidPrice?: number // ask or bid price depending on order type — private orders only
+  period?: number // lock period in blocks — private orders only
 }
 
 export const formatWalletAddress = (address: string) => {

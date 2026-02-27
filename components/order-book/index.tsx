@@ -27,6 +27,11 @@ interface OrderBookProps {
   ofm?: [number, number, number];
   highlightedOrderId?: string | null;
   onHighlightComplete?: () => void;
+  filterAddress?: string | null;
+  onFilterAddressChange?: (address: string | null) => void;
+  filteredOrders?: Order[];
+  filteredFilledMap?: Record<string, Order[]>;
+  filteredConnectionState?: ConnectionState;
 }
 
 export function OrderBook({
@@ -49,13 +54,20 @@ export function OrderBook({
   ofm,
   highlightedOrderId,
   onHighlightComplete,
+  filterAddress,
+  onFilterAddressChange,
+  filteredOrders = [],
+  filteredFilledMap = {},
+  filteredConnectionState = "disconnected",
 }: OrderBookProps) {
   // Memoize columns so they don't recreate on every render
   const memoizedColumns = React.useMemo(() => columns(prices), [prices]);
 
   const renderSubComponent = React.useCallback(({ row }: { row: any }) => {
     const order = row.original;
-    const filledOrders = filledOrdersMap[order.escrow] || [];
+    // Reason: Parent orders have origin === escrow, so they'd appear as their own child.
+    const filledOrders = (filledOrdersMap[order.escrow] || [])
+      .filter((fo: Order) => fo.uuid !== order.uuid);
     return (
       <OrderBookRowDetails
         key={`${order.uuid}-${order.status}-${order.stp}-${order.public}`}
@@ -75,7 +87,8 @@ export function OrderBook({
   }, [filledOrdersMap, prices, newlyAddedOrderIds, onUpdateOrder, onCancelOrder, onFillOrder, onRecMessage, apiUrl, walletAddress, ofm]);
 
   const renderSplitSubComponent = React.useCallback((order: Order) => {
-    const filledOrders = filledOrdersMap[order.escrow] || [];
+    const filledOrders = (filledOrdersMap[order.escrow] || [])
+      .filter((fo: Order) => fo.uuid !== order.uuid);
     return (
       <OrderBookRowDetails
         key={`${order.uuid}-${order.status}-${order.stp}-${order.public}`}
@@ -112,6 +125,11 @@ export function OrderBook({
       subnetNames={subnetNames}
       highlightedOrderId={highlightedOrderId}
       onHighlightComplete={onHighlightComplete}
+      filterAddress={filterAddress}
+      onFilterAddressChange={onFilterAddressChange}
+      filteredOrders={filteredOrders}
+      filteredFilledMap={filteredFilledMap}
+      filteredConnectionState={filteredConnectionState}
     />
   );
 }

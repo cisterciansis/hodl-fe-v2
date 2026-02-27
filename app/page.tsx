@@ -67,6 +67,9 @@ function HomeContent() {
   const [showLoading, setShowLoading] = useState(true);
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const [myOrdersLoaded, setMyOrdersLoaded] = useState(false);
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
+  const [filteredOrdersLoaded, setFilteredOrdersLoaded] = useState(false);
+  const [filterAddress, setFilterAddress] = useState<string | null>(null);
   const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const [subnetNames, setSubnetNames] = useState<Record<number, string>>({});
@@ -596,6 +599,113 @@ function HomeContent() {
     return () => clearTimeout(timer);
   }, [myOrdersConnectionState, myOrdersLoaded]);
 
+  // --- Filtered Orders WS: /ws/new?ss58=filterAddress ---
+  // Reason: When the filter includes an ss58 address, we open a dedicated WS
+  // to fetch ALL orders for that address (any status/privacy), instead of
+  // client-side filtering the public stream which only has open+public orders.
+
+  const mergeFilteredBatch = useCallback((incoming: unknown[]) => {
+    if (incoming.length === 0) return;
+    setFilteredOrders((prev) => {
+      const map = new Map(prev.map((o) => [o.uuid, o]));
+      for (const raw of incoming) {
+        if (!raw || typeof raw !== "object") continue;
+        const normalized = normalizeOrder(raw);
+        if (!normalized.uuid) continue;
+        const existing = map.get(normalized.uuid);
+        if (existing) {
+          if (normalized.status <= 0 && existing.status > 0) continue;
+          if (normalized.status > 0 && existing.status > 0 && normalized.status < existing.status) continue;
+        }
+        map.set(normalized.uuid, normalized);
+      }
+      return Array.from(map.values());
+    });
+  }, [normalizeOrder]);
+
+  const handleFilteredWsMessage = useCallback(
+    (message: WebSocketMessage | unknown) => {
+      if (!message || typeof message !== "object") return;
+
+      if (Array.isArray(message)) {
+        mergeFilteredBatch(message);
+        if (!filteredOrdersLoaded) setFilteredOrdersLoaded(true);
+        return;
+      }
+
+      const msg = message as Record<string, unknown>;
+      const keys = Object.keys(msg);
+
+      if (keys.length === 0) {
+        if (!filteredOrdersLoaded) setFilteredOrdersLoaded(true);
+        return;
+      }
+
+      const sampleKey = "uuid" in msg ? "uuid" : "date" in msg ? "date" : "";
+      if (sampleKey) {
+        const sample = msg[sampleKey];
+        if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
+          const rows = columnsToRows(msg);
+          mergeFilteredBatch(rows);
+          if (!filteredOrdersLoaded) setFilteredOrdersLoaded(true);
+          return;
+        }
+      }
+
+      if ("data" in msg && msg.data !== undefined) {
+        const payload = msg.data;
+        if (Array.isArray(payload)) {
+          mergeFilteredBatch(payload);
+        } else if (payload && typeof payload === "object") {
+          const normalized = normalizeOrder(payload);
+          if (normalized.uuid) {
+            setFilteredOrders((prev) => {
+              const idx = prev.findIndex((o) => o.uuid === normalized.uuid);
+              if (idx !== -1) {
+                const next = [...prev];
+                next[idx] = { ...prev[idx], ...normalized };
+                return next;
+              }
+              return [normalized, ...prev];
+            });
+          }
+        }
+        if (!filteredOrdersLoaded) setFilteredOrdersLoaded(true);
+        return;
+      }
+
+      if ("uuid" in msg && "date" in msg) {
+        const normalized = normalizeOrder(msg);
+        if (normalized.uuid) {
+          setFilteredOrders((prev) => {
+            const idx = prev.findIndex((o) => o.uuid === normalized.uuid);
+            if (idx !== -1) {
+              const next = [...prev];
+              next[idx] = { ...prev[idx], ...normalized };
+              return next;
+            }
+            return [normalized, ...prev];
+          });
+        }
+        if (!filteredOrdersLoaded) setFilteredOrdersLoaded(true);
+        return;
+      }
+    },
+    [mergeFilteredBatch, columnsToRows, normalizeOrder, filteredOrdersLoaded]
+  );
+
+  const { connectionState: filteredConnectionState } = useWebSocket({
+    url: getWebSocketNewUrl({ ss58: filterAddress || undefined }),
+    enabled: !!filterAddress,
+    onMessage: handleFilteredWsMessage,
+  });
+
+  // Reset filtered state when filterAddress changes
+  useEffect(() => {
+    setFilteredOrders([]);
+    setFilteredOrdersLoaded(false);
+  }, [filterAddress]);
+
   // /ws/tap - handles TAO/Alpha/Price triplet updates
   // Carries both per-escrow updates AND subnet price broadcasts
   const pendingPricesRef = useRef<Record<number, number>>({});
@@ -956,7 +1066,26 @@ function HomeContent() {
     return { myOpenOrders: open, myFilledMap: filled };
   }, [myOrders]);
 
-  const filledOrdersMap = showMyOrdersOnly ? myFilledMap : publicFilledMap;
+  const filteredFilledMap = useMemo(() => {
+    const filled: Record<string, Order[]> = {};
+    filteredOrders.forEach((order) => {
+      if (order.status === 2 || order.status === 3) {
+        const parentKey = order.origin || order.uuid;
+        if (!filled[parentKey]) filled[parentKey] = [];
+        filled[parentKey].push(order);
+      }
+    });
+    Object.keys(filled).forEach((key) => {
+      filled[key].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    });
+    return filled;
+  }, [filteredOrders]);
+
+  const filledOrdersMap = showMyOrdersOnly
+    ? myFilledMap
+    : filterAddress
+      ? filteredFilledMap
+      : publicFilledMap;
 
   const sortedOrders = useMemo(() => {
     // My Orders: show all wallet orders (any status) from dedicated WS stream
@@ -1139,6 +1268,11 @@ function HomeContent() {
           ofm={ofm}
           highlightedOrderId={highlightedOrderId}
           onHighlightComplete={() => setHighlightedOrderId(null)}
+          filterAddress={filterAddress}
+          onFilterAddressChange={setFilterAddress}
+          filteredOrders={filteredOrders}
+          filteredFilledMap={filteredFilledMap}
+          filteredConnectionState={filteredConnectionState}
         />
 
         <NewOrderModal

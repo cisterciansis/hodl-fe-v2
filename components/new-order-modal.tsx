@@ -282,7 +282,13 @@ export function NewOrderModal({
     stp: undefined,
     partial: true,
     public: true,
+    accept: undefined,
+    askBidPrice: undefined,
+    period: undefined,
   });
+  // Reason: Track whether user explicitly chose Ask vs Bid for the price field.
+  // Auto-set from order type, but user can toggle manually before selecting a type.
+  const [askBidMode, setAskBidMode] = React.useState<"ask" | "bid" | null>(null);
 
   const {
     tao: walletTaoBalance,
@@ -495,7 +501,11 @@ export function NewOrderModal({
       stp: undefined,
       partial: true,
       public: true,
+      accept: undefined,
+      askBidPrice: undefined,
+      period: undefined,
     });
+    setAskBidMode(null);
     setEscrowWallet("");
     setOriginWallet("");
     setOrderUuid("");
@@ -561,6 +571,20 @@ export function NewOrderModal({
     ((formData.type === 1 && formData.stp > priceForConversion) ||
      (formData.type === 2 && formData.stp < priceForConversion));
 
+  // Effective ask/bid mode: auto-follows order type, but user can override
+  const effectiveAskBid = askBidMode ?? (formData.type === 1 ? "ask" : formData.type === 2 ? "bid" : null);
+
+  const getPrivateOrderFields = () => {
+    if (formData.public) return { accept: "", ask: 0, bid: 0, period: 0 };
+    const price = formData.askBidPrice ?? 0;
+    return {
+      accept: formData.accept || "",
+      ask: effectiveAskBid === "ask" ? price : 0,
+      bid: effectiveAskBid === "bid" ? price : 0,
+      period: formData.period ?? 0,
+    };
+  };
+
   const handleNext = async () => {
     try {
       setLoading(true);
@@ -593,14 +617,19 @@ export function NewOrderModal({
       }
       const backendUrl = apiUrl || API_URL;
       const dbRecord = await fetchDbRecord(backendUrl);
+      const privateFields = getPrivateOrderFields();
       const orderData = buildRecPayload({
         ...dbRecord,
         uuid: wsUuid,
         origin: "",
         escrow: "",
         wallet: walletAddress,
+        accept: privateFields.accept,
+        period: privateFields.period,
         asset: formData.asset,
         type: formData.type,
+        ask: privateFields.ask,
+        bid: privateFields.bid,
         stp: formData.stp ?? 0,
         gtd: formData.gtd === "gtc" ? "gtc" : selectedDate?.toISOString() || "gtc",
         partial: formData.partial,
@@ -766,14 +795,19 @@ export function NewOrderModal({
 
       const backendUrl = apiUrl || API_URL;
       const dbRecord = await fetchDbRecord(backendUrl, finalEscrow);
+      const privateFields = getPrivateOrderFields();
       const orderData = buildRecPayload({
         ...dbRecord,
         uuid: finalUuid,
         origin: finalOrigin,
         escrow: finalEscrow,
         wallet: finalWallet,
+        accept: privateFields.accept,
+        period: privateFields.period,
         asset: formData.asset,
         type: formData.type,
+        ask: privateFields.ask,
+        bid: privateFields.bid,
         stp: formData.stp ?? 0,
         gtd: formData.gtd === "gtc" ? "gtc" : selectedDate?.toISOString() || "gtc",
         partial: formData.partial,
@@ -871,14 +905,19 @@ export function NewOrderModal({
 
         const backendUrl = apiUrl || API_URL;
         const dbRecord = await fetchDbRecord(backendUrl, escrowWallet.trim());
+        const privateFields = getPrivateOrderFields();
         const orderData = buildRecPayload({
           ...dbRecord,
           uuid: wsUuid,
           origin: escrowWallet.trim(),
           escrow: escrowWallet.trim(),
           wallet: walletAddress,
+          accept: privateFields.accept,
+          period: privateFields.period,
           asset: formData.asset,
           type: formData.type,
+          ask: privateFields.ask,
+          bid: privateFields.bid,
           stp: formData.stp ?? 0,
           gtd: formData.gtd === "gtc" ? "gtc" : selectedDate?.toISOString() || "gtc",
           partial: formData.partial,
@@ -1130,7 +1169,24 @@ export function NewOrderModal({
                     {isBalanceLoading ? (
                       <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Checking balance…</span>
                     ) : currentBalance != null ? (
-                      <>Wallet balance: {currentBalance.toFixed(4)} {symbol}</>
+                      <button
+                        type="button"
+                        className="hover:text-foreground transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-muted-foreground/70"
+                        disabled={escrowGenerated && !isInReviewMode}
+                        onClick={() => {
+                          if (escrowGenerated && !isInReviewMode) return;
+                          if (needsTao) {
+                            setFormData((prev) => ({ ...prev, tao: currentBalance }));
+                            setTransferInputMode("tao");
+                          } else {
+                            setFormData((prev) => ({ ...prev, alpha: currentBalance }));
+                            setTransferInputMode("alpha");
+                          }
+                        }}
+                        title={`Use max: ${currentBalance.toFixed(4)} ${symbol}`}
+                      >
+                        Wallet balance: {currentBalance.toFixed(4)} {symbol}
+                      </button>
                     ) : null}
                   </p>
                   {insufficient && (
@@ -1270,9 +1326,18 @@ export function NewOrderModal({
                 </button>
               </div>
             </div>
-            <p className="text-sm text-muted-foreground opacity-60">
+            <button
+              type="button"
+              className="text-sm text-muted-foreground opacity-60 hover:opacity-100 hover:text-foreground transition-all cursor-pointer disabled:cursor-default disabled:hover:opacity-60 disabled:hover:text-muted-foreground text-left"
+              disabled={(escrowGenerated && !isInReviewMode) || priceForConversion <= 0}
+              onClick={() => {
+                if ((escrowGenerated && !isInReviewMode) || priceForConversion <= 0) return;
+                setFormData((prev) => ({ ...prev, stp: Number(priceForConversion.toFixed(6)) }));
+              }}
+              title={priceForConversion > 0 ? `Use market price: ${priceForConversion.toFixed(6)}` : undefined}
+            >
               Market Price {priceForConversion > 0 ? priceForConversion.toFixed(6) : "0.000000"}
-            </p>
+            </button>
             {formData.stp != null && formData.stp > 0 && priceForConversion > 0 && formData.type === 1 && formData.stp > priceForConversion && (
               <p className="text-sm text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -1417,6 +1482,153 @@ export function NewOrderModal({
                 <p>When unchecked, this order is <strong>private</strong> — it will only be visible to you through the &quot;My Orders&quot; filter. Other users will not see it in the order book.</p>
               </TooltipContent>
             </Tooltip>
+          </div>
+
+          {/* Private order fields — revealed when Public is unchecked */}
+          <div
+            className={cn(
+              "grid gap-4 overflow-hidden transition-all duration-200",
+              !formData.public ? "max-h-[500px] opacity-100 mt-1" : "max-h-0 opacity-0"
+            )}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="accept">Counter Party Wallet Address</Label>
+              <Input
+                id="accept"
+                type="text"
+                value={formData.accept || ""}
+                onChange={(e) => setFormData({ ...formData, accept: e.target.value || undefined })}
+                disabled={escrowGenerated && !isInReviewMode}
+                placeholder="Enter wallet address (ss58)"
+                className="font-mono text-sm focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40"
+              />
+              <p className="text-xs text-muted-foreground opacity-60">
+                Only this wallet will be able to fill the order.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="askBidPrice">
+                  {effectiveAskBid === "ask" ? "Ask" : effectiveAskBid === "bid" ? "Bid" : "Ask/Bid"} Price
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (escrowGenerated && !isInReviewMode) return;
+                    setAskBidMode(effectiveAskBid === "ask" ? "bid" : "ask");
+                  }}
+                  disabled={escrowGenerated && !isInReviewMode}
+                  className="h-[1.5rem] w-[2.5rem] flex items-center rounded-md justify-center border border-slate-200 dark:border-border/60 bg-white dark:bg-card/50 shadow-sm hover:bg-slate-50 dark:hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+                  aria-label="Toggle between Ask and Bid price"
+                  title="Toggle Ask/Bid"
+                >
+                  <span className="text-[10px] font-medium">
+                    {effectiveAskBid === "ask" ? "Ask" : effectiveAskBid === "bid" ? "Bid" : "A/B"}
+                  </span>
+                </button>
+              </div>
+              <div className="relative flex items-center">
+                <Input
+                  id="askBidPrice"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  value={formData.askBidPrice ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    const parsed = parseFloat(value);
+                    setFormData({
+                      ...formData,
+                      askBidPrice: value === "" ? undefined : (isNaN(parsed) ? undefined : Math.max(0, parsed)),
+                    });
+                  }}
+                  disabled={escrowGenerated && !isInReviewMode}
+                  placeholder="Enter price"
+                  className="font-mono focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40 pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <div className="absolute right-1 flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!escrowGenerated || isInReviewMode) {
+                        setFormData({ ...formData, askBidPrice: Number(((formData.askBidPrice ?? 0) + 0.001).toFixed(3)) });
+                      }
+                    }}
+                    disabled={escrowGenerated && !isInReviewMode}
+                    className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Increase price"
+                  >
+                    <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!escrowGenerated || isInReviewMode) {
+                        setFormData({ ...formData, askBidPrice: Math.max(0, Number(((formData.askBidPrice ?? 0) - 0.001).toFixed(3))) });
+                      }
+                    }}
+                    disabled={escrowGenerated && !isInReviewMode}
+                    className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Decrease price"
+                  >
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="period">Lock Period (Blocks)</Label>
+              <div className="relative flex items-center">
+                <Input
+                  id="period"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.period ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    const parsed = parseInt(value, 10);
+                    setFormData({
+                      ...formData,
+                      period: value === "" ? undefined : (isNaN(parsed) ? undefined : Math.max(0, parsed)),
+                    });
+                  }}
+                  disabled={escrowGenerated && !isInReviewMode}
+                  placeholder="Enter block count"
+                  className="font-mono focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40 pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <div className="absolute right-1 flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!escrowGenerated || isInReviewMode) {
+                        setFormData({ ...formData, period: (formData.period ?? 0) + 1 });
+                      }
+                    }}
+                    disabled={escrowGenerated && !isInReviewMode}
+                    className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Increase lock period"
+                  >
+                    <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!escrowGenerated || isInReviewMode) {
+                        setFormData({ ...formData, period: Math.max(0, (formData.period ?? 0) - 1) });
+                      }
+                    }}
+                    disabled={escrowGenerated && !isInReviewMode}
+                    className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Decrease lock period"
+                  >
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

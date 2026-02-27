@@ -328,6 +328,8 @@ export function FillOrderModal({
         origin: order.escrow,
         escrow: "",
         wallet: walletAddress,
+        accept: order.accept || "",
+        period: order.period || 0,
         asset: fixedValues.asset,
         type: fixedValues.type,
         ask: order.ask || 0,
@@ -427,6 +429,8 @@ export function FillOrderModal({
           origin: order.escrow,
           escrow: escrowWallet.trim(),
           wallet: walletAddress,
+          accept: order.accept || "",
+          period: order.period || 0,
           asset: fixedValues.asset,
           type: fixedValues.type,
           ask: order.ask || 0,
@@ -545,6 +549,8 @@ export function FillOrderModal({
         origin: order.escrow,
         escrow: escrowWallet,
         wallet: walletAddress,
+        accept: order.accept || "",
+        period: order.period || 0,
         asset: fixedValues.asset,
         type: fixedValues.type,
         ask: order.ask || 0,
@@ -671,6 +677,37 @@ export function FillOrderModal({
           <div className="p-3 rounded-md bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm flex items-center gap-2">
             <CheckIcon className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
             <span>Order filled successfully. You may safely close this dialog.</span>
+          </div>
+        )}
+
+        {/* Private order constraints — shown when parent order is private */}
+        {!order.public && (
+          <div className="p-3 rounded-md bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-border/50 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80">
+              Private Order Details
+            </p>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground text-xs">Counter Party</span>
+                <p className="font-mono text-foreground truncate" title={order.accept || undefined}>
+                  {order.accept ? `${order.accept.slice(0, 4)}...${order.accept.slice(-4)}` : "Any"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground text-xs">{order.type === 1 ? "Ask" : "Bid"} Price</span>
+                <p className="font-mono text-foreground">
+                  {(order.type === 1 ? order.ask : order.bid) > 0
+                    ? (order.type === 1 ? order.ask : order.bid).toFixed(4)
+                    : "None"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground text-xs">Lock Period</span>
+                <p className="font-mono text-foreground">
+                  {order.period > 0 ? `${order.period.toLocaleString()} blocks` : "None"}
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -871,7 +908,24 @@ export function FillOrderModal({
                     {isBalanceLoading ? (
                       <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Checking balance…</span>
                     ) : currentBalance != null ? (
-                      <>Wallet balance: {currentBalance.toFixed(4)} {symbol}</>
+                      <button
+                        type="button"
+                        className="hover:text-foreground transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-muted-foreground/70"
+                        disabled={escrowGenerated && !isInReviewMode}
+                        onClick={() => {
+                          if (escrowGenerated && !isInReviewMode) return;
+                          if (needsTao) {
+                            setTransferTao(currentBalance);
+                            setTransferInputMode("tao");
+                          } else {
+                            setTransferAlpha(currentBalance);
+                            setTransferInputMode("alpha");
+                          }
+                        }}
+                        title={`Use max: ${currentBalance.toFixed(4)} ${symbol}`}
+                      >
+                        Wallet balance: {currentBalance.toFixed(4)} {symbol}
+                      </button>
                     ) : null}
                   </p>
                   {insufficient && (

@@ -207,6 +207,32 @@
 - [x] **Unified amber color for both badges** — Changed status 6 (Expired) from purple to amber in `getStatusColor` so both Stopped and Expired use yellow/amber styling.
 - [x] **All views updated** — Desktop table (`columns.tsx`) and mobile cards (`data-table.tsx`) both use `getDisplayStatus()`. Split view and row details confirmed no changes needed (split view only shows Open orders, row details only shows Filled/Closed child orders).
 
+### 2026-02-26 — Private Order Fields
+
+#### Completed
+- [x] **Private order fields (accept, ask/bid, period)** — When "Public" is unchecked, three new fields appear:
+  - **Counter Party Wallet Address** (`accept`): ss58 text input, restricts who can fill the order
+  - **Ask/Bid Price** (`ask`/`bid`): Numeric input, auto-labels Ask (Sell) or Bid (Buy) based on order type, with manual toggle; defaults to "Ask/Bid Price" when no type selected
+  - **Lock Period (Blocks)** (`period`): Integer input for block count
+- [x] **Open Order modal** — Added collapsible section below Public checkbox with smooth transition, disabled after escrow creation (same pattern as other fields). All three `/rec` payload paths updated (handleNext, handleFinalPlaceOrder, handleReviewOrder).
+- [x] **Modify Order dialog** — Added same three fields conditionally in the edit dialog when Public is unchecked. `handleSaveEdit` sends accept/ask/bid/period in the update payload.
+- [x] **Row details expansion pane** — Both wallet and non-wallet variants display Counter Party, Ask/Bid Price, and Lock Period fieldsets when order is private.
+- [x] **Fill Order modal** — Displays read-only "Private Order Details" info panel when parent order is private. All three payload paths (handleCreateEscrow, handleReviewOrder, handleFillOrder) now pass `accept` and `period`.
+- [x] **Data model** — Extended `NewOrderFormData` interface with `accept`, `askBidPrice`, and `period` fields.
+
+### 2026-02-26 — Clickable Auto-Fill Helpers
+
+#### Completed
+- [x] **Clickable wallet balance → auto-fill order size** — In both Open Order and Fill Order modals, the "Wallet balance: X.XXXX τ/α" text below the order size input is now clickable. Clicking it auto-fills the order size with the user's full wallet balance and switches the input mode to match the balance currency (TAO for buy orders, Alpha for sell orders). Disabled after escrow creation (same pattern as other fields).
+- [x] **Clickable market price → auto-fill floor/ceiling price** — In the Open Order modal, the "Market Price X.XXXXXX" text below the Floor/Ceiling Price input is now clickable. Clicking it auto-fills the floor/ceiling price with the current market price. Disabled after escrow creation or when no market price is available.
+
+### 2026-02-26 — Filter WS + Expansion Pane Fixes
+
+#### Completed
+- [x] **Self-referencing parent order fix** — Parent orders (where `origin === escrow`) appeared as their own child in the expansion pane. Fixed by filtering out the parent UUID from the `filledOrdersMap` lookup in both `renderSubComponent` and `renderSplitSubComponent` (`components/order-book/index.tsx`).
+- [x] **Child-row column alignment** — Expansion pane's filled-orders table used hardcoded pixel widths in `<colgroup>` that could drift from the main table. Switched to percentage-based widths derived from the same column ratios (160/110/60/50/70/70/90/90 = 700px total). Added `align-middle` to child `<td>` cells to match ShadCN `TableCell`. Also fixed child Asset column reading `order.asset` (parent) instead of `filledOrder.asset`.
+- [x] **Dedicated WS for ss58-filtered orders** — When the filter includes an ss58 address, the UI now opens a dedicated `/ws/new?ss58=address` WebSocket (same pattern as My Orders) to stream ALL orders for that address regardless of status/privacy. Non-ss58 filters still use client-side filtering of the public stream. My Orders remains a separate stream. Added: `filterAddress`/`filteredOrders`/`filteredFilledMap` state in `page.tsx`, `mergeFilteredBatch` + `handleFilteredWsMessage` handlers, threaded props through `index.tsx` → `data-table.tsx`, connection state indicator switches to filter WS when active.
+
 ## Discovered During Work
 - `fill-order-modal.tsx` and `new-order-modal.tsx` also referenced old `getWebSocketBookUrl` — updated to `getWebSocketNewUrl`
 

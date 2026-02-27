@@ -101,6 +101,11 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
   const [editPublic, setEditPublic] = React.useState(order.public);
   const [editGtd, setEditGtd] = React.useState(order.gtd || "gtc");
   const [editPartial, setEditPartial] = React.useState(order.partial || false);
+  const [editAccept, setEditAccept] = React.useState(order.accept || "");
+  const [editAskBidPrice, setEditAskBidPrice] = React.useState(
+    order.type === 1 ? order.ask : order.bid
+  );
+  const [editPeriod, setEditPeriod] = React.useState(order.period || 0);
   const [selectedDate, setSelectedDate] = React.useState<Date | undefined>(
     undefined
   );
@@ -128,8 +133,11 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
     setEditPublic(order.public);
     setEditGtd(order.gtd || "gtc");
     setEditPartial(order.partial || false);
+    setEditAccept(order.accept || "");
+    setEditAskBidPrice(order.type === 1 ? order.ask : order.bid);
+    setEditPeriod(order.period || 0);
     setSelectedDate(parseGtdToDate(order.gtd));
-  }, [order.stp, order.public, order.gtd, order.partial, parseGtdToDate]);
+  }, [order.stp, order.public, order.gtd, order.partial, order.accept, order.ask, order.bid, order.period, order.type, parseGtdToDate]);
 
   React.useEffect(() => {
     if (isEditDialogOpen) {
@@ -137,6 +145,9 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
       setEditPublic(order.public);
       setEditGtd(order.gtd || "gtc");
       setEditPartial(order.partial || false);
+      setEditAccept(order.accept || "");
+      setEditAskBidPrice(order.type === 1 ? order.ask : order.bid);
+      setEditPeriod(order.period || 0);
       setSelectedDate(parseGtdToDate(order.gtd));
     }
   }, [
@@ -145,6 +156,11 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
     order.public,
     order.gtd,
     order.partial,
+    order.accept,
+    order.ask,
+    order.bid,
+    order.period,
+    order.type,
     parseGtdToDate,
   ]);
 
@@ -181,19 +197,33 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
       const gtdValue =
         editGtd === "gtc" ? "gtc" : selectedDate?.toISOString() || "gtc";
 
+      const currentAskBid = order.type === 1 ? order.ask : order.bid;
       const hasChanges =
         editStp !== order.stp ||
         editPublic !== order.public ||
         gtdValue !== (order.gtd || "gtc") ||
-        editPartial !== (order.partial || false);
+        editPartial !== (order.partial || false) ||
+        editAccept !== (order.accept || "") ||
+        editAskBidPrice !== currentAskBid ||
+        editPeriod !== (order.period || 0);
 
       setIsEditDialogOpen(false);
+
+      const privateFields = editPublic
+        ? { accept: "", ask: 0, bid: 0, period: 0 }
+        : {
+            accept: editAccept,
+            ask: order.type === 1 ? editAskBidPrice : 0,
+            bid: order.type === 2 ? editAskBidPrice : 0,
+            period: editPeriod,
+          };
 
       await onUpdateOrder(order.uuid, {
         stp: editStp,
         public: editPublic,
         gtd: gtdValue,
         partial: editPartial,
+        ...privateFields,
       });
 
       if (hasChanges) {
@@ -379,6 +409,102 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                         Public order (visible to everyone)
                       </Label>
                     </div>
+
+                    {/* Private order fields — revealed when Public is unchecked */}
+                    <div
+                      className={cn(
+                        "grid gap-4 overflow-hidden transition-all duration-200",
+                        !editPublic ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                      )}
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-accept">Counter Party Wallet Address</Label>
+                        <Input
+                          id="edit-accept"
+                          type="text"
+                          value={editAccept}
+                          onChange={(e) => setEditAccept(e.target.value)}
+                          placeholder="Enter wallet address (ss58)"
+                          className="font-mono text-sm focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40"
+                        />
+                        <p className="text-xs text-muted-foreground opacity-60">
+                          Only this wallet will be able to fill the order.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-askBidPrice">
+                          {order.type === 1 ? "Ask" : "Bid"} Price
+                        </Label>
+                        <div className="relative flex items-center">
+                          <Input
+                            id="edit-askBidPrice"
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={editAskBidPrice || ""}
+                            onChange={(e) =>
+                              setEditAskBidPrice(parseFloat(e.target.value) || 0)
+                            }
+                            placeholder="Enter price"
+                            className="font-mono focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40 pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <div className="absolute right-1 flex flex-col gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setEditAskBidPrice(Number((editAskBidPrice + 0.001).toFixed(3)))}
+                              className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 transition-colors"
+                              aria-label={`Increase ${order.type === 1 ? "ask" : "bid"} price`}
+                            >
+                              <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditAskBidPrice(Math.max(0, Number((editAskBidPrice - 0.001).toFixed(3))))}
+                              className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 transition-colors"
+                              aria-label={`Decrease ${order.type === 1 ? "ask" : "bid"} price`}
+                            >
+                              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-period">Lock Period (Blocks)</Label>
+                        <div className="relative flex items-center">
+                          <Input
+                            id="edit-period"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={editPeriod || ""}
+                            onChange={(e) =>
+                              setEditPeriod(parseInt(e.target.value, 10) || 0)
+                            }
+                            placeholder="Enter block count"
+                            className="font-mono focus-visible:ring-1 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 focus-visible:border-blue-500/40 pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <div className="absolute right-1 flex flex-col gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setEditPeriod(editPeriod + 1)}
+                              className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 transition-colors"
+                              aria-label="Increase lock period"
+                            >
+                              <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditPeriod(Math.max(0, editPeriod - 1))}
+                              className="h-4 w-6 flex items-center justify-center rounded-sm border border-border bg-background hover:bg-muted active:bg-muted/80 transition-colors"
+                              aria-label="Decrease lock period"
+                            >
+                              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex items-center space-x-2">
                       <Checkbox
                         id="partial"
@@ -404,6 +530,9 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                         setEditPublic(order.public);
                         setEditGtd(order.gtd || "gtc");
                         setEditPartial(order.partial || false);
+                        setEditAccept(order.accept || "");
+                        setEditAskBidPrice(order.type === 1 ? order.ask : order.bid);
+                        setEditPeriod(order.period || 0);
                         setSelectedDate(parseGtdToDate(order.gtd));
                         setIsEditDialogOpen(false);
                       }}
@@ -567,6 +696,34 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                   {order.public ? "Yes" : "No"}
                 </span>
               </fieldset>
+              {!order.public && (
+                <>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      Counter Party
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {order.accept ? formatWalletAddress(order.accept) : "None"}
+                    </span>
+                  </fieldset>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      {order.type === 1 ? "Ask" : "Bid"} Price
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {(order.type === 1 ? order.ask : order.bid) > 0 ? formatPrice(order.type === 1 ? order.ask : order.bid) : "None"}
+                    </span>
+                  </fieldset>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      Lock Period
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {order.period > 0 ? `${order.period.toLocaleString()} blocks` : "None"}
+                    </span>
+                  </fieldset>
+                </>
+              )}
             </div>
           </fieldset>
         ) : (
@@ -611,6 +768,34 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                   {order.public ? "Yes" : "No"}
                 </span>
               </fieldset>
+              {!order.public && (
+                <>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      Counter Party
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {order.accept ? formatWalletAddress(order.accept) : "None"}
+                    </span>
+                  </fieldset>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      {order.type === 1 ? "Ask" : "Bid"} Price
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {(order.type === 1 ? order.ask : order.bid) > 0 ? formatPrice(order.type === 1 ? order.ask : order.bid) : "None"}
+                    </span>
+                  </fieldset>
+                  <fieldset className="flex flex-col justify-center gap-1.5 px-3 pb-[0.6rem] pt-[0.2rem] mt-[0.2rem] rounded-md bg-slate-50 dark:bg-transparent border border-slate-200 dark:border-border/40">
+                    <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-muted-foreground/80 px-1">
+                      Lock Period
+                    </legend>
+                    <span className="font-mono text-sm text-slate-900 dark:text-foreground pl-1">
+                      {order.period > 0 ? `${order.period.toLocaleString()} blocks` : "None"}
+                    </span>
+                  </fieldset>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -619,17 +804,19 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
       {filledOrders.length > 0 && (
         <>
           {/* Desktop: table layout — negative margins cancel parent px so columns align with the main order book table */}
+          {/* Reason: Percentage widths derived from column sizes (160+110+60+50+70+70+90+90=700)
+              ensure proportional alignment with the main table regardless of container width. */}
           <div className="!my-2 hidden sm:block -mx-3 sm:-mx-6">
             <table className="w-full text-sm table-fixed border-separate border-spacing-0">
               <colgroup>
-                <col style={{ width: 160 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 50 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 90 }} />
+                <col style={{ width: "22.857%" }} />
+                <col style={{ width: "15.714%" }} />
+                <col style={{ width: "8.571%" }} />
+                <col style={{ width: "7.143%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "12.857%" }} />
+                <col style={{ width: "12.857%" }} />
               </colgroup>
               <tbody>
                 {filledOrders.map((filledOrder, index) => {
@@ -645,10 +832,10 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
 
                   return (
                     <tr key={uniqueKey} className={`hover:bg-muted/50 transition-colors ${flashClass}`}>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="font-mono whitespace-nowrap pl-4 text-sm">{formatDate(filledOrder.date)}</div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono whitespace-nowrap block text-sm" title={filledOrder.escrow}>{formatWalletAddress(filledOrder.escrow)}</span>
                           <button
@@ -663,29 +850,29 @@ export const OrderBookRowDetails = React.memo(function OrderBookRowDetails({
                           </a>
                         </div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <Badge variant={orderTypeLabel === "Buy" ? "outline" : "secondary"} className={`font-medium ${orderTypeLabel === "Buy" ? "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400" : "text-rose-600 border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 dark:text-rose-400"}`}>{orderTypeLabel}</Badge>
                       </td>
-                      <td className="p-4">
-                        {order.asset === 0 ? <span className="font-mono text-sm">—</span> : (
+                      <td className="p-4 align-middle">
+                        {filledOrder.asset === 0 ? <span className="font-mono text-sm">—</span> : (
                           <div className="flex justify-end gap-1.5">
-                            <span className="font-mono text-sm">SN{order.asset}</span>
-                            <a href={`https://taomarketcap.com/subnets/${order.asset}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground mt-[2px] transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View subnet ${order.asset} on TaoMarketCap`} onClick={(e) => e.stopPropagation()}>
+                            <span className="font-mono text-sm">SN{filledOrder.asset}</span>
+                            <a href={`https://taomarketcap.com/subnets/${filledOrder.asset}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground mt-[2px] transition-all flex-shrink-0 opacity-60 hover:opacity-90" title={`View subnet ${filledOrder.asset} on TaoMarketCap`} onClick={(e) => e.stopPropagation()}>
                               <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                           </div>
                         )}
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="text-right font-mono text-sm">{formatTao(Number(filledOrder.tao ?? 0))}</div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="text-right font-mono text-sm">{formatNumber(Number(filledOrder.alpha ?? 0))}</div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="flex justify-end pr-4 font-mono text-sm">{filledOrder.price != null && Number(filledOrder.price) > 0 ? formatPrice(Number(filledOrder.price)) : formatPrice(filledOrder.stp || 0)}</div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 align-middle">
                         <div className="flex justify-center pr-4">
                           <Badge variant="outline" className="font-medium text-gray-600 dark:text-gray-400 border-gray-200 dark:border-border">{isClosed ? "Closed" : "Filled"}</Badge>
                         </div>
